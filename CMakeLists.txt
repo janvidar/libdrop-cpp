@@ -33,13 +33,9 @@ if(NOT samurai_FOUND)
     endif()
 endif()
 
-# HMAC-SHA1 and HMAC-SHA256, which STUN short-term credentials need and which
-# Samurai's crypto does not yet offer. Samurai links OpenSSL PUBLIC for its TLS,
-# so this is already present rather than a dependency of our own; see
-# src/hmac.h for the shim that keeps the swap to a future Samurai API local.
-find_package(OpenSSL REQUIRED)
-
-# crc32 for the STUN FINGERPRINT attribute. Samurai already requires zlib.
+# crc32, for the STUN FINGERPRINT attribute. Samurai already requires zlib.
+# Everything else this needs - SHA, HMAC, secure random, constant-time compare
+# - comes from Samurai, so there is no crypto dependency of our own.
 find_package(ZLIB REQUIRED)
 
 set(DROP_SOURCES
@@ -63,7 +59,7 @@ target_include_directories(drop
 
 target_link_libraries(drop
     PUBLIC samurai::samurai
-    PRIVATE OpenSSL::Crypto ZLIB::ZLIB)
+    PRIVATE ZLIB::ZLIB)
 
 target_compile_features(drop PUBLIC cxx_std_20)
 set_target_properties(drop PROPERTIES

@@ -18,8 +18,11 @@ still blocks every inbound packet. Only measuring from outside settles it.
 ## Requirements
 
 - C++20
-- Samurai, which supplies the sockets, TLS, HTTP client, UPnP gateway and JSON
-- OpenSSL, already a Samurai dependency, for HMAC-SHA1 and HMAC-SHA256
+- Samurai, which supplies everything: sockets, TLS, HTTP client, UPnP gateway,
+  JSON, and the SHA/HMAC that STUN short-term credentials need
+
+There is no crypto dependency of its own. zlib is linked for `crc32`, which
+the STUN FINGERPRINT attribute uses, and Samurai already requires it.
 
 Samurai is found as an installed package, or built from a source tree beside
 this one:

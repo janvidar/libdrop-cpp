@@ -12,16 +12,16 @@
 #include <vector>
 
 /**
- * HMAC-SHA1 and HMAC-SHA256, which STUN short-term credentials need.
+ * The primitives STUN short-term credentials need.
  *
- * The whole of the dependency on a crypto library lives in this file and its
- * implementation. Samurai's crypto offers Tiger and a Merkle tree but no SHA
- * family and no HMAC, so this currently calls OpenSSL - which is already linked
- * for Samurai's TLS, so it costs nothing to reach.
+ * Thin wrappers over Samurai, which supplies all of them:
+ * Samurai::Crypto::hmacSha1 and hmacSha256, Samurai::Util::constantTimeEquals
+ * and Samurai::Util::secureRandom. They are wrapped rather than called
+ * directly only to keep the STUN code reading in terms of byte vectors instead
+ * of HashValue, and to leave one place to look if any of it moves.
  *
- * When Samurai grows an HMAC of its own, hmac.cpp is the only file that
- * changes. Nothing above this include is aware of which library is underneath,
- * which is the point of it being here rather than inline at the call sites.
+ * There is no dependency on a crypto library here. This used to call OpenSSL
+ * because Samurai had Tiger and no SHA family; it now does.
  */
 namespace Drop {
 namespace Crypto {
@@ -35,10 +35,10 @@ std::vector<uint8_t> hmacSha256(std::span<const uint8_t> key,
                                 std::span<const uint8_t> message);
 
 /**
- * Compare in time that does not depend on where the first difference is.
+ * Compare without leaking where the first difference is.
  *
  * A comparison that returns early tells an attacker how much of a guess was
- * right, which is enough to find the rest one byte at a time.
+ * right, which turns guessing a MAC into guessing it one byte at a time.
  */
 bool equals(std::span<const uint8_t> a, std::span<const uint8_t> b);
 
