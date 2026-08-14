@@ -1,0 +1,490 @@
+<title>ADC Active-Mode Detection</title>
+<style>
+  :root {
+    --paper:      #F2F4F6;
+    --surface:    #FFFFFF;
+    --ink:        #14181D;
+    --ink-muted:  #5B6672;
+    --rule:       #D3DAE0;
+    --accent:     #0E6E6B;
+    --code-bg:    #E9EDF0;
+
+    --open:     #1C7A4E;
+    --filtered: #8A6516;
+    --refused:  #A6402C;
+
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas,
+            "Liberation Mono", monospace;
+    --serif: Charter, "Bitstream Charter", "Iowan Old Style", "Source Serif Pro",
+             Georgia, serif;
+
+    --measure: 68ch;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:      #101418;
+      --surface:    #171C22;
+      --ink:        #E4E9ED;
+      --ink-muted:  #93A0AC;
+      --rule:       #2A323A;
+      --accent:     #4FBDB5;
+      --code-bg:    #1D242B;
+
+      --open:     #5CBF8A;
+      --filtered: #D6A84B;
+      --refused:  #E08268;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --paper:      #101418;
+    --surface:    #171C22;
+    --ink:        #E4E9ED;
+    --ink-muted:  #93A0AC;
+    --rule:       #2A323A;
+    --accent:     #4FBDB5;
+    --code-bg:    #1D242B;
+
+    --open:     #5CBF8A;
+    --filtered: #D6A84B;
+    --refused:  #E08268;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--serif);
+    font-size: 17px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: var(--measure);
+    margin: 0 auto;
+    padding: 4rem 1.5rem 6rem;
+    display: flex;
+    flex-direction: column;
+    gap: 2.5rem;
+  }
+
+  header { display: flex; flex-direction: column; gap: 0.9rem; }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0;
+  }
+
+  h1 {
+    font-family: var(--mono);
+    font-size: clamp(1.6rem, 4.2vw, 2.25rem);
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    line-height: 1.16;
+    text-wrap: balance;
+    margin: 0;
+  }
+
+  .standfirst {
+    font-size: 1.12rem;
+    color: var(--ink-muted);
+    margin: 0;
+    max-width: 58ch;
+  }
+
+  .meta {
+    font-family: var(--mono);
+    font-size: 0.74rem;
+    color: var(--ink-muted);
+    border-top: 1px solid var(--rule);
+    padding-top: 0.9rem;
+    margin: 0;
+  }
+
+  section { display: flex; flex-direction: column; gap: 1rem; }
+
+  h2 {
+    font-family: var(--mono);
+    font-size: 0.98rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    margin: 0;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--rule);
+    text-wrap: balance;
+  }
+
+  h3 {
+    font-family: var(--mono);
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--ink-muted);
+    margin: 0.6rem 0 0;
+    text-wrap: balance;
+  }
+
+  p { margin: 0; }
+
+  a { color: var(--accent); text-underline-offset: 0.18em; }
+  a:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  strong { font-weight: 600; }
+
+  code {
+    font-family: var(--mono);
+    font-size: 0.855em;
+    background: var(--code-bg);
+    padding: 0.1em 0.34em;
+    border-radius: 3px;
+  }
+
+  pre {
+    font-family: var(--mono);
+    font-size: 0.79rem;
+    line-height: 1.6;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: 1rem 1.1rem;
+    margin: 0;
+    overflow-x: auto;
+  }
+  pre code { background: none; padding: 0; font-size: inherit; }
+
+  .cmt { color: var(--ink-muted); }
+
+  .rule-panel {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 4px 4px 0;
+    padding: 1.1rem 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.7rem;
+  }
+
+  .rule-panel .label {
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+
+  .rule-panel .claim {
+    font-family: var(--mono);
+    font-size: 1rem;
+    font-weight: 600;
+    line-height: 1.4;
+    text-wrap: balance;
+  }
+
+  ol.flow {
+    list-style: none;
+    counter-reset: step;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1.1rem;
+  }
+  ol.flow > li {
+    counter-increment: step;
+    display: grid;
+    grid-template-columns: 2.1rem 1fr;
+    gap: 0.9rem;
+    align-items: baseline;
+  }
+  ol.flow > li::before {
+    content: counter(step, decimal-leading-zero);
+    font-family: var(--mono);
+    font-size: 0.74rem;
+    font-variant-numeric: tabular-nums;
+    color: var(--accent);
+  }
+
+  dl.pitfalls { margin: 0; display: flex; flex-direction: column; gap: 1.3rem; }
+  dl.pitfalls dt {
+    font-family: var(--mono);
+    font-size: 0.86rem;
+    font-weight: 600;
+    margin-bottom: 0.3rem;
+    text-wrap: balance;
+  }
+  dl.pitfalls dd { margin: 0; }
+
+  .verdicts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    font-family: var(--mono);
+    font-size: 0.72rem;
+  }
+  .chip {
+    border: 1px solid currentColor;
+    border-radius: 999px;
+    padding: 0.16em 0.7em;
+    letter-spacing: 0.02em;
+  }
+  .chip.open     { color: var(--open); }
+  .chip.filtered { color: var(--filtered); }
+  .chip.refused  { color: var(--refused); }
+  .chip.other    { color: var(--ink-muted); }
+
+  dl.files { margin: 0; font-family: var(--mono); font-size: 0.8rem; }
+  dl.files dt { color: var(--accent); }
+  dl.files dd { color: var(--ink-muted); margin: 0 0 0.7rem; }
+
+  footer {
+    border-top: 1px solid var(--rule);
+    padding-top: 1.2rem;
+    color: var(--ink-muted);
+    font-size: 0.92rem;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+
+<div class="wrap">
+
+  <header>
+    <p class="eyebrow">DROP &middot; integration note</p>
+    <h1>Auto-detecting active mode in an ADC client</h1>
+    <p class="standfirst">For a client already built on Samurai. About twenty
+      lines of real work; the rest is the handful of details that decide whether
+      the answer is trustworthy.</p>
+    <p class="meta">libdrop-cpp &middot; C++20 &middot; protocol: doc/drop.txt (DRAFT)</p>
+  </header>
+
+  <section>
+    <h2>What you are asking</h2>
+    <p>ADC only works peer-to-peer when at least one side is <em>active</em> —
+      able to accept an inbound TCP connection. Two passive clients cannot
+      connect to each other at all. Clients normally guess, and a wrong guess
+      shows the user &ldquo;no search results&rdquo; or a download stuck at 0%
+      with no explanation.</p>
+    <p>DROP replaces the guess with a measurement: a server dials your listening
+      port from outside and tells you whether it arrived.</p>
+    <div class="verdicts">
+      <span class="chip open">open</span>
+      <span class="chip refused">refused</span>
+      <span class="chip filtered">filtered</span>
+      <span class="chip other">occupied</span>
+      <span class="chip other">no_response</span>
+    </div>
+  </section>
+
+  <section>
+    <div class="rule-panel">
+      <span class="label">The rule that matters</span>
+      <p class="claim">Test the sockets you actually advertise.</p>
+      <p>Not a fresh socket, not an ephemeral port. If you test port 40000 and
+        advertise <code>U4=1511</code>, you have measured something true about a
+        port nobody will ever connect to. Both responders are therefore free
+        functions you call from listeners you already own.</p>
+    </div>
+
+    <h3>In your client-to-client TCP accept path</h3>
+    <p>You already demultiplex <code>CSUP</code> from a TLS ClientHello. Add a
+      third case:</p>
+<pre><code><span class="cmt">// "CSUP"      ADC client-to-client, plaintext
+// 0x16 0x03   TLS ClientHello (ADCS)
+// "DROP/1 "   a DROP challenge</span>
+std::string response;
+if (Drop::TcpResponder::handleChallenge(line, response)) {
+    socket-&gt;write(response.data(), response.size(), ec);
+    socket-&gt;close();
+    return;                 <span class="cmt">// one line each way, then done</span>
+}</code></pre>
+    <p>A TLS-only port must still accept the plaintext challenge. Recognising a
+      seven-byte prefix before the handshake costs nothing, and requiring TLS
+      for a single-use nonce buys nothing.</p>
+
+    <h3>In your U4/U6 UDP read loop</h3>
+    <p>The socket that receives search results is the socket that must answer:</p>
+<pre><code>std::vector&lt;uint8_t&gt; reply;
+if (Drop::handleStunProbe(datagram, stunUser, stunPass, from, reply)) {
+    socket-&gt;send(reply, from);
+    return;
+}
+<span class="cmt">// Not for us — hand it to the ADC parser as before.</span></code></pre>
+    <p><code>stunUser</code> and <code>stunPass</code> come from the session
+      below, and <strong>must be empty whenever no check is running</strong>.
+      With them empty this answers nobody, which is the point: a client that
+      answers unauthenticated STUN is an open reflector an attacker can aim
+      anywhere with a spoofed source address. Clear them when the check
+      finishes.</p>
+    <p>Demultiplexing is unambiguous — STUN has its top two bits zero and a
+      fixed magic cookie, while every ADC message starts with an ASCII context
+      letter.</p>
+  </section>
+
+  <section>
+    <h2>The flow</h2>
+    <p><code>Drop::check()</code> exists and is one call, but it is
+      <strong>blocking</strong> and opens its own ephemeral sockets, so it is for
+      tools rather than for you. Drive <code>Drop::Client</code> from your
+      existing <code>SocketMonitor</code> instead — in this order, which is not
+      arbitrary:</p>
+
+    <ol class="flow">
+      <li><code>requestServerInfo()</code> — confirms this is a DROP server and
+        not a captive portal answering 200 to everything.</li>
+      <li><code>requestWhoami()</code> — your public address. Useful on its own,
+        and free.</li>
+      <li><code>openSession()</code> — hands you the STUN credentials. Your
+        listeners are already up, so there is nothing to arm.</li>
+      <li><code>requestInbound()</code> — the server dials back while this
+        request is outstanding.</li>
+    </ol>
+
+<pre><code>Drop::Client::Options options;
+options.localAddress = myAdvertisedAddress;   <span class="cmt">// see below</span>
+
+Drop::Client client(this, "https://ipv4.drop.quickdc.org",
+                    Drop::Family::IPv4, options);</code></pre>
+
+    <p>Then apply the shared decision table rather than writing your own:</p>
+
+<pre><code>Drop::Decision d = Drop::decide(family, whoami.classification,
+                                inbound.findTcp(myTcpPort),
+                                inbound.findUdp(myUdpPort),
+                                myTcpPort);
+
+if (d.mode == Drop::Mode::Active) {
+    inf.set("SU", "TCP4,UDP4,...");   <span class="cmt">// the ADC active-mode signal</span>
+    inf.set("U4", std::to_string(d.advertisePort));
+}
+<span class="cmt">// d.reason and d.remedies are written for the user; show them verbatim.</span></code></pre>
+
+    <p>That table lives in one place on purpose. A user who moves between two
+      clients and gets two different explanations of the same network concludes
+      one of them is broken.</p>
+  </section>
+
+  <section>
+    <h2>Five things that will bite you</h2>
+    <dl class="pitfalls">
+      <div>
+        <dt>Set SU and U4 together</dt>
+        <dd>The ADC specification says active mode is the <code>TCP4</code> /
+          <code>TCP6</code> tokens in <code>SU</code>; <code>U4</code> /
+          <code>U6</code> carry the UDP port for search results. Deployed hubs
+          disagree about which they read — uhub counts <code>U4</code>/<code>U6</code>
+          and does not recognise <code>TCP4</code> at all — so set them
+          consistently and never infer one from the other.</dd>
+      </div>
+      <div>
+        <dt>Do not guess your own address</dt>
+        <dd>Hubs discard client-supplied <code>I4</code>/<code>I6</code> and
+          substitute what they observe. DROP tells you whether to advertise a
+          <em>port</em>, not which address to claim.</dd>
+      </div>
+      <div>
+        <dt>Pin your source address if you are multi-homed</dt>
+        <dd>A host with several addresses of one family has no source address
+          until you name one: the kernel picks per destination. Set
+          <code>Options::localAddress</code> to the address you intend to
+          advertise. On IPv6 this is not an edge case — a client listening on
+          <code>[::]</code> with privacy extensions will otherwise have DROP
+          validate a temporary address it never advertises.</dd>
+      </div>
+      <div>
+        <dt>Run each family separately, against its own name</dt>
+        <dd>Use the <code>ipv4.</code> and <code>ipv6.</code> prefixed hostnames.
+          One connection has one source address, and relying on the dual-stack
+          name leaves the family under test to whichever connection Happy
+          Eyeballs won. Being active on IPv6 and passive on IPv4 is a good
+          position and worth telling the user about — it is most of what
+          carrier-grade NAT would otherwise cost them.</dd>
+      </div>
+      <div>
+        <dt>Cache, and re-check on change</dt>
+        <dd>Key the result on the observed address, keep it about fifteen
+          minutes, and invalidate on interface up/down, address change, VPN
+          connect or resume from suspend. Re-running on every hub connect is
+          unnecessary and rude to a service somebody pays for.</dd>
+      </div>
+    </dl>
+  </section>
+
+  <section>
+    <h2>If the answer is passive</h2>
+    <div class="rule-panel">
+      <span class="label">Why the loop exists</span>
+      <p class="claim">Ask the gateway, then measure again.</p>
+      <p>A router grants a mapping and reports success without knowing whether
+        anything upstream honours it. A second carrier-grade NAT above it will
+        happily let the forward be created and then drop every packet. Only the
+        second measurement settles it.</p>
+    </div>
+<pre><code>Drop::CheckOptions options;
+options.useUpnp = true;        <span class="cmt">// check, map, check again</span>
+options.keepMapping = true;    <span class="cmt">// keep it when it actually helped</span></code></pre>
+    <p>A mapping that did not help is always removed. If you build this yourself
+      with <code>Drop::Upnp::addMapping()</code>, note that a verdict measured
+      <em>through</em> a mapping you then tear down does not describe the state
+      your user is left in — say so, or keep the mapping.</p>
+  </section>
+
+  <section>
+    <h2>What DROP will not tell you</h2>
+    <p><code>Drop::NatDiscovery</code> (RFC 5780) answers &ldquo;would hole
+      punching work&rdquo;, which is a <strong>different question</strong> from
+      &ldquo;can strangers reach me&rdquo;. Every request in it is
+      client-initiated, so a good result says nothing about unsolicited inbound
+      traffic — only the inbound UDP probe answers that. Use it to decide
+      whether to offer NAT traversal, never to decide active mode.</p>
+    <p>It also runs <em>after</em> the inbound test, never before: once you have
+      sent to the server's STUN endpoints, a NAT doing address-dependent
+      filtering will admit a datagram from them that it would have dropped from
+      a stranger — and a stranger is precisely who sends search results.</p>
+  </section>
+
+  <section>
+    <h2>Before you trust an &ldquo;open&rdquo;</h2>
+    <p>Confirm it against a second, independent DROP server. One misconfigured
+      or hostile checker can otherwise talk your client into an active-mode
+      claim that degrades the experience of every peer that tries to connect to
+      it. Ship a small list of servers and let the user override it.</p>
+  </section>
+
+  <section>
+    <h2>Where to look</h2>
+    <dl class="files">
+      <dt>include/drop/client.h</dt>
+      <dd>the async control plane</dd>
+      <dt>include/drop/responder.h</dt>
+      <dd>handleChallenge() and handleStunProbe()</dd>
+      <dt>include/drop/types.h</dt>
+      <dd>decide(), the table, and the wire types</dd>
+      <dt>src/check.cpp</dt>
+      <dd>the whole flow written out — the worked example</dd>
+      <dt>docs/drop.txt</dt>
+      <dd>the protocol, normative</dd>
+    </dl>
+  </section>
+
+  <footer>
+    <p>The specification is still DRAFT and this implementation is one of the two
+      that shaped it. If something here reads as arbitrary, it is probably a rule
+      that exists because getting it wrong produced a confident, plausible,
+      wrong answer.</p>
+  </footer>
+
+</div>

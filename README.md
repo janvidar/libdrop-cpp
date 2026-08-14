@@ -57,7 +57,8 @@ other socket measures a different port than the one in your `U4`/`U6`. Both
 responders expose their protocol as free functions — `handleChallenge()` and
 `handleStunProbe()` — so a client folds them into listeners it already has
 rather than opening a second pair. See
-[`docs/adc-integration.md`](docs/adc-integration.md).
+[`docs/adc-integration.md`](docs/adc-integration.md), which is the
+one-pager for client authors.
 
 **Pin your source address on a multi-homed host.** A host with several
 addresses of one family has no single source address: the kernel picks one per
