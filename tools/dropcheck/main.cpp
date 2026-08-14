@@ -110,7 +110,19 @@ void printFamily(const Drop::FamilyReport& report)
 
 	if (!report.error.ok())
 	{
-		printf("  could not test: %s\n\n", report.error.message().c_str());
+		printf("  could not test: %s\n", report.error.message().c_str());
+		/*
+		 * A transport failure against a family-specific name usually means
+		 * this host has no connectivity in that family at all, which is worth
+		 * saying: a socket errno is not something a user can act on, and
+		 * "you have no IPv6" is.
+		 */
+		if (report.error.error == Drop::Error::Transport)
+			wrap(std::string("This host may have no ")
+			     + (report.family == Drop::Family::IPv6 ? "IPv6" : "IPv4")
+			     + " connectivity, in which case there is nothing to test and "
+			       "nothing wrong.", 18);
+		printf("\n");
 		return;
 	}
 
