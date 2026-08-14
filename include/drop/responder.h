@@ -1,0 +1,155 @@
+/*
+ * Copyright (C) 2026 Jan Vidar Krey, janvidar@extatic.org
+ * See the file "COPYING" for licensing details.
+ */
+
+#ifndef HAVE_DROP_RESPONDER_H
+#define HAVE_DROP_RESPONDER_H
+
+#include <drop/stun.h>
+#include <drop/types.h>
+
+#include <samurai/io/net/datagram.h>
+#include <samurai/io/net/serversocket.h>
+#include <samurai/io/net/socket.h>
+#include <samurai/io/net/socketevent.h>
+
+#include <memory>
+#include <string>
+#include <vector>
+
+namespace Drop {
+
+/**
+ * Answers the DROP challenge on a TCP port.
+ *
+ * A DC client would fold this into the client-to-client listener it already
+ * has rather than opening a second one, demultiplexing on the first bytes:
+ *
+ *     "CSUP"        ADC client-to-client, plaintext
+ *     0x16 0x03     TLS ClientHello (ADCS)
+ *     "DROP/1 "     a DROP challenge
+ *
+ * A port that otherwise accepts only TLS must still take the plaintext
+ * challenge: recognising a seven-byte prefix before the handshake is trivial,
+ * and requiring TLS for a single-use nonce exchange buys nothing.
+ *
+ * handleChallenge() is public so that a client which has its own listener can
+ * use the protocol without this class at all.
+ */
+class TcpResponder final
+	: public Samurai::IO::Net::ServerSocketEventHandler
+	, public Samurai::IO::Net::SocketEventHandler
+{
+	public:
+		TcpResponder();
+		~TcpResponder() override;
+
+		TcpResponder(const TcpResponder&) = delete;
+		TcpResponder& operator=(const TcpResponder&) = delete;
+
+		/**
+		 * Bind and listen.
+		 *
+		 * @param bindAddress the address to listen on, or empty for any.
+		 * @param port zero for an ephemeral one, which getPort() then reports.
+		 */
+		bool listen(Family family, const std::string& bindAddress, uint16_t port);
+
+		uint16_t getPort() const { return port; }
+		void close();
+
+		/** How many challenges have been answered, for tests and diagnostics. */
+		int getAnswered() const { return answered; }
+
+		/**
+		 * Turn a challenge line into its response.
+		 *
+		 * @return false when the line is not a DROP challenge, in which case the
+		 *         bytes belong to whatever else shares the port.
+		 */
+		static bool handleChallenge(std::string_view line, std::string& response);
+
+	private:
+		void EventAcceptError(const Samurai::IO::Net::ServerSocket*, const char*) override;
+		void EventAcceptSocket(const Samurai::IO::Net::ServerSocket*,
+		                       std::shared_ptr<Samurai::IO::Net::Socket>) override;
+
+		void EventDataAvailable(const Samurai::IO::Net::Socket*) override;
+		void EventDisconnected(const Samurai::IO::Net::Socket*) override;
+		void EventError(const Samurai::IO::Net::Socket*,
+		                Samurai::IO::Net::SocketError, const char*) override;
+
+		void forget(const Samurai::IO::Net::Socket* socket);
+
+		std::shared_ptr<Samurai::IO::Net::ServerSocket> server;
+		/** Held until each has answered or gone away. */
+		std::vector<std::shared_ptr<Samurai::IO::Net::Socket>> accepted;
+		uint16_t port = 0;
+		int answered = 0;
+};
+
+/**
+ * Answers authenticated STUN Binding Requests on a UDP port.
+ *
+ * MUST run on the very socket the client advertises in U4/U6, or the test
+ * measures a different port than the one that matters.
+ *
+ * The credential check is not optional politeness. Without it every client
+ * becomes an open STUN responder that an attacker can aim anywhere with a
+ * spoofed source address, so a request whose MESSAGE-INTEGRITY does not verify
+ * against a session opened moments ago is met with silence.
+ */
+class UdpResponder final : public Samurai::IO::Net::DatagramEventHandler
+{
+	public:
+		UdpResponder();
+		~UdpResponder() override;
+
+		UdpResponder(const UdpResponder&) = delete;
+		UdpResponder& operator=(const UdpResponder&) = delete;
+
+		bool listen(Family family, const std::string& bindAddress, uint16_t port);
+
+		uint16_t getPort() const { return port; }
+		void close();
+
+		/**
+		 * The credentials to accept, from the session just opened.
+		 *
+		 * Clearing them stops the responder answering anything, which is what a
+		 * client should do once its inbound test has finished.
+		 */
+		void setCredentials(std::string username, std::string password);
+		void clearCredentials();
+
+		int getAnswered() const { return answered; }
+		/** Requests seen but refused, which is what a scan looks like. */
+		int getRefused() const { return refused; }
+
+		/** The socket, so behaviour discovery can share it if a caller wants. */
+		std::shared_ptr<Samurai::IO::Net::DatagramSocket> getSocket() const
+		{ return socket; }
+
+	private:
+		void EventGotDatagram(Samurai::IO::Net::DatagramSocket*,
+		                      Samurai::IO::Net::DatagramPacket*) override;
+		void EventDatagramError(const Samurai::IO::Net::DatagramSocket*,
+		                        const char* msg) override;
+
+		std::shared_ptr<Samurai::IO::Net::DatagramSocket> socket;
+		std::string username;
+		std::string password;
+		uint16_t port = 0;
+		int answered = 0;
+		int refused = 0;
+
+		/** Answers per second, so a flood cannot be amplified through us. */
+		int budget = 0;
+		int64_t budgetSecond = 0;
+		bool withinBudget();
+};
+
+}
+
+#endif // HAVE_DROP_RESPONDER_H
