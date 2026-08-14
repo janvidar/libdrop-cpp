@@ -127,6 +127,8 @@ void printFamily(const Drop::FamilyReport& report)
 		printf("  Inbound UDP:     port %u: %s%s%s\n", r.port, toString(r.verdict),
 		       r.detail.empty() ? "" : " - ", r.detail.c_str());
 
+	for (const std::string& note : report.notes)
+		wrap("Note: " + note, 19);
 	for (const std::string& note : report.inbound.notes)
 		wrap("Note: " + note, 19);
 

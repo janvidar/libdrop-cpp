@@ -187,8 +187,22 @@ void Client::requestInbound(const Session& session,
 		return;
 	}
 
+	/*
+	 * control_port is deliberately not sent.
+	 *
+	 * It is specified as the source port of "this very control connection",
+	 * and with one request per connection - which HTTP/1.1 with
+	 * Connection: close means - the body is assembled before the socket
+	 * exists. Anything this could put here would be the *previous* request's
+	 * port, which differs from the observed one on every host, so the server
+	 * would report source-port rewriting for everybody.
+	 *
+	 * The same fact is available without a wire field: compare the local port
+	 * of the /v1/whoami connection against the port that response reported,
+	 * which are the two ends of one connection. checkFamily() does that.
+	 */
 	internal_post(Pending::Inbound, "/v1/session/" + session.id + "/inbound",
-	              Wire::writeInboundRequest(tcpPorts, udpPorts, control_port),
+	              Wire::writeInboundRequest(tcpPorts, udpPorts, 0),
 	              options.inboundTimeout);
 }
 

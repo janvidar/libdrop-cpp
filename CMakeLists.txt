@@ -47,6 +47,7 @@ set(DROP_SOURCES
     src/stun.cpp
     src/responder.cpp
     src/upnp.cpp
+    src/natdisc.cpp
     src/check.cpp)
 
 add_library(drop STATIC ${DROP_SOURCES})

@@ -88,6 +88,9 @@ struct FamilyReport
 	InboundResult inbound;
 	Decision decision;
 
+	/** Observations about the run that belong to no single port. */
+	std::vector<std::string> notes;
+
 	std::vector<EgressResult> egress;
 
 	bool upnpAttempted = false;

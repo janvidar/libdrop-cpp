@@ -6,6 +6,7 @@
 #include <drop/check.h>
 
 #include <drop/client.h>
+#include <drop/natdisc.h>
 #include <drop/responder.h>
 #include "pump.h"
 
@@ -249,6 +250,27 @@ FamilyReport checkFamily(const std::string& baseUrl, Family family,
 	report.whoami = events.whoami;
 
 	/*
+	 * Source-port rewriting, detected locally.
+	 *
+	 * These two are the ends of one connection: the port this client bound and
+	 * the port the server saw. A difference is a NAT rewriting source ports,
+	 * which tells the user a NAT is in the path before any probe verdict comes
+	 * back. Doing it here rather than by sending control_port is what makes it
+	 * correct - see the note in Client::requestInbound.
+	 */
+	if (const uint16_t localPort = client.getControlPort())
+	{
+		if (report.whoami.port && localPort != report.whoami.port)
+		{
+			report.notes.push_back(
+				"This connection left your machine on port "
+				+ std::to_string(localPort) + " but reached the server as port "
+				+ std::to_string(report.whoami.port)
+				+ ", so a NAT is rewriting source ports.");
+		}
+	}
+
+	/*
 	 * Arm the listeners before opening the session. The server connects back
 	 * while /inbound is outstanding, so binding afterwards races the probe.
 	 */
@@ -377,6 +399,39 @@ FamilyReport checkFamily(const std::string& baseUrl, Family family,
 				                    report.upnp.udpExternalPort,
 				                    options.upnp);
 			}
+		}
+	}
+
+	/*
+	 * Behaviour discovery last of the measurements, and after the inbound test
+	 * rather than before it. Once this has sent to the server's STUN
+	 * endpoints, a NAT doing address-dependent filtering will admit a datagram
+	 * from them that it would have dropped from a stranger - and a stranger is
+	 * precisely who sends ADC search results.
+	 */
+	if (options.discoverNat && report.server.supports(family, "nat"))
+	{
+		NatDiscovery::Options natOptions;
+		if (const std::optional<Stun::Endpoint> primary =
+		        Stun::parseEndpoint(session.stunPrimary, session.stunPrimaryPort))
+			natOptions.primary = *primary;
+
+		/*
+		 * The address the control connection came from, so the NAT answer is
+		 * about the same address as everything else in this report. Without a
+		 * pinned source the kernel picks per destination, and the mapping
+		 * tests deliberately aim at two addresses of one server.
+		 */
+		natOptions.localAddress = bindAddress.empty()
+			? client.getControlAddress() : bindAddress;
+		natOptions.username = session.username;
+		natOptions.password = session.password;
+
+		if (natOptions.primary.valid())
+		{
+			report.nat = NatDiscovery::discover(natOptions);
+			report.natTested = true;
+			applyNat(report.decision, report.nat);
 		}
 	}
 

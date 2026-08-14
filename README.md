@@ -77,9 +77,10 @@ deployment at `drop.quickdc.org` from a real NAT'd connection:
   from `filtered` to `open`
 - `check()` and the `dropcheck` tool
 
-Not yet written: RFC 5780 NAT behaviour discovery (`FamilyReport::natTested` is
-always false, and the fields are present so that a caller written against them
-need not change when it lands).
+RFC 5780 NAT behaviour discovery is included, and verified against the live
+server over IPv6 -- the family where it offers a second address. On a host with
+no NAT it correctly reports `mapping: none` and `filtering:
+endpoint-independent`, matching what the Go client reports for the same host.
 
 ## Tests
 
