@@ -87,16 +87,24 @@ endpoint-independent`, matching what the Go client reports for the same host.
 
     cmake --build build && ./build/test/droptest
 
-95 tests through [exotic](https://github.com/janvidar/exotic), the framework
+109 tests through [exotic](https://github.com/janvidar/exotic), the framework
 Samurai and uhub use. They need no network: the responder cases stand up real
 sockets on the loopback interface, and everything else is pure logic or a
 captured document.
 
 The weight is on what should be *refused* rather than on the happy path — an
 open reflector, a peer that is not a DROP server, a request body that could
-name an address, a truncated datagram. Two deliberate mutations were used to
-confirm the suite bites: removing the STUN credential check and making the
-CGNAT advice suggest port forwarding both fail it.
+name an address, a truncated datagram.
+
+The RFC 5780 classification is driven by a four-endpoint STUN server on the
+loopback interface. A NAT is only a thing that makes the mapped address differ
+per destination, so a server that simply *reports* chosen addresses exercises
+every branch of the tree without one.
+
+Confirmed to bite by mutation rather than by passing: removing the STUN
+credential check, making the CGNAT advice suggest port forwarding, reporting a
+refused CHANGE-REQUEST as a restrictive NAT, and collapsing the
+address-dependent branch all fail the suite.
 
 ## The protocol
 

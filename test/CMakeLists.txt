@@ -38,6 +38,7 @@ exotic_add_tests(droptest
     LANGUAGE CXX
     SOURCES
         exotic/decide.tcc
+        exotic/natdisc.tcc
         exotic/responder.tcc
         exotic/stun.tcc
         exotic/types.tcc
