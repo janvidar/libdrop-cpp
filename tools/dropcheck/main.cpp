@@ -194,7 +194,16 @@ void printFamily(const Drop::FamilyReport& report)
 
 	std::string mode = toString(report.decision.mode);
 	for (char& c : mode) c = (char) toupper((unsigned char) c);
-	printf("\n  VERDICT:         %s\n", mode.c_str());
+
+	/* A verdict measured through a mapping that has since been removed does
+	   not describe the state the user is left in. */
+	const bool transient = report.upnpAttempted
+	                    && report.upnp.mappingAdded
+	                    && !report.upnp.retained
+	                    && report.decision.mode == Drop::Mode::Active;
+
+	printf("\n  VERDICT:         %s%s\n", mode.c_str(),
+	       transient ? "  (only while the UPnP mapping was in place)" : "");
 	wrap(report.decision.reason, 2);
 	if (!report.decision.note.empty())
 		wrap(report.decision.note, 2);

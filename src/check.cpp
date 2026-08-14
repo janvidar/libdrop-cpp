@@ -372,9 +372,30 @@ FamilyReport checkFamily(const std::string& baseUrl, Family family,
 			const bool helped = report.decision.mode == Mode::Active;
 			if (helped)
 			{
-				report.upnp.summary = "The gateway granted a mapping and it "
-				                      "worked: inbound connections now reach you.";
 				report.upnp.retained = options.keepMapping;
+				if (report.upnp.retained)
+				{
+					report.upnp.summary = "The gateway granted a mapping and it "
+					                      "worked: inbound connections now reach "
+					                      "you, and the mapping has been left in "
+					                      "place.";
+				}
+				else
+				{
+					/*
+					 * The verdict above was measured with the mapping in place,
+					 * and the mapping is about to be removed - so it describes a
+					 * state that will not exist once this run ends. Saying
+					 * "active" and stopping there would have the user act on a
+					 * reachability they no longer have.
+					 */
+					report.upnp.summary =
+						"The gateway granted a mapping and it worked: with it in "
+						"place, inbound connections reached you. It has now been "
+						"removed, so you are passive again. Re-run with the "
+						"mapping kept, or forward the port on your router, to "
+						"make this permanent.";
+				}
 			}
 			else
 			{
