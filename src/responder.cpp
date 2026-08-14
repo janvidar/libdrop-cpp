@@ -254,6 +254,64 @@ bool UdpResponder::withinBudget()
 	return ++budget <= ANSWERS_PER_SECOND;
 }
 
+/*
+ * The protocol, with no socket in it. UdpResponder is a thin wrapper that owns
+ * a socket and calls this; an ADC client calls it directly from the read loop
+ * of the socket it already advertises.
+ */
+bool handleStunProbe(std::span<const uint8_t> datagram,
+                     std::string_view username, std::string_view password,
+                     const Stun::Endpoint& from,
+                     std::vector<uint8_t>& reply)
+{
+	reply.clear();
+
+	/*
+	 * Demultiplex. Anything that is not STUN belongs to whatever application
+	 * shares this socket - for a DC client, its ADC UDP search results, which
+	 * begin with an ASCII letter and so can never look like STUN.
+	 */
+	if (!Stun::Message::looksLikeStun(datagram))
+		return false;
+
+	Stun::Message request;
+	if (!Stun::Message::decode(datagram, request))
+		return false;
+	if (request.type != Stun::BINDING_REQUEST)
+		return false;   /* answering a response would let two agents ping-pong */
+	if (!request.checkFingerprint())
+		return false;
+
+	/*
+	 * Everything below is met with silence rather than an error. An error is
+	 * still a reply, and a reply to a spoofed source is exactly the reflection
+	 * this rule exists to prevent.
+	 */
+	if (password.empty())
+		return false;
+
+	const std::optional<std::string> user = request.getUsername();
+	if (!user || *user != username)
+		return false;
+
+	const std::span<const uint8_t> key(
+		reinterpret_cast<const uint8_t*>(password.data()), password.size());
+	if (!request.checkMessageIntegrity(key))
+		return false;
+
+	if (!from.valid())
+		return false;
+
+	Stun::Message response = Stun::Message::response(request);
+	response.addAddress(Stun::Attr::XorMappedAddress, from, true);
+	response.addMessageIntegritySha256(key);
+	response.addMessageIntegrity(key);
+	response.addFingerprint();
+
+	reply = response.encode();
+	return true;
+}
+
 void UdpResponder::EventGotDatagram(DatagramSocket* from, DatagramPacket* packet)
 {
 	if (!from || !packet)
@@ -262,53 +320,6 @@ void UdpResponder::EventGotDatagram(DatagramSocket* from, DatagramPacket* packet
 	uint8_t buf[1500];
 	const int got = packet->read(buf, sizeof(buf));
 	if (got <= 0)
-		return;
-
-	const std::span<const uint8_t> datagram(buf, static_cast<size_t>(got));
-
-	/*
-	 * Demultiplex. Anything that is not STUN belongs to whatever application
-	 * shares this socket - for a DC client, its ADC UDP search results, which
-	 * begin with an ASCII letter and so can never look like STUN.
-	 */
-	if (!Stun::Message::looksLikeStun(datagram))
-		return;
-
-	Stun::Message request;
-	if (!Stun::Message::decode(datagram, request))
-		return;
-	if (request.type != Stun::BINDING_REQUEST)
-		return;
-	if (!request.checkFingerprint())
-		return;
-
-	/*
-	 * Unauthenticated requests are met with silence, not with an error. An
-	 * error would still be a reply, and a reply to a spoofed source is exactly
-	 * the reflection this rule exists to prevent.
-	 */
-	if (password.empty())
-	{
-		refused++;
-		return;
-	}
-
-	const std::optional<std::string> user = request.getUsername();
-	if (!user || *user != username)
-	{
-		refused++;
-		return;
-	}
-
-	const std::span<const uint8_t> key(
-		reinterpret_cast<const uint8_t*>(password.data()), password.size());
-	if (!request.checkMessageIntegrity(key))
-	{
-		refused++;
-		return;
-	}
-
-	if (!withinBudget())
 		return;
 
 	Samurai::IO::Net::SocketAddress* peer = packet->getAddress();
@@ -325,22 +336,31 @@ void UdpResponder::EventGotDatagram(DatagramSocket* from, DatagramPacket* packet
 	if (!peerAddress)
 		return;
 
-	std::optional<Stun::Endpoint> reflexive =
+	const std::optional<Stun::Endpoint> reflexive =
 		Stun::parseEndpoint(peerAddress->toString(), inet->getPort());
 	if (!reflexive)
 		return;
 
-	Stun::Message response = Stun::Message::response(request);
-	response.addAddress(Stun::Attr::XorMappedAddress, *reflexive, true);
-	response.addMessageIntegritySha256(key);
-	response.addMessageIntegrity(key);
-	response.addFingerprint();
+	/* Counted before the budget so that a scan is visible in getRefused()
+	   even when the answer is withheld. */
+	const bool wasStun =
+		Stun::Message::looksLikeStun(std::span<const uint8_t>(buf, (size_t) got));
 
-	const std::vector<uint8_t> wire = response.encode();
+	std::vector<uint8_t> reply;
+	if (!handleStunProbe(std::span<const uint8_t>(buf, (size_t) got),
+	                     username, password, *reflexive, reply))
+	{
+		if (wasStun)
+			refused++;
+		return;
+	}
 
-	DatagramPacket reply(wire.data(), wire.size());
-	reply.setAddress(peer);
-	from->send(&reply);
+	if (!withinBudget())
+		return;
+
+	DatagramPacket out(reply.data(), reply.size());
+	out.setAddress(peer);
+	from->send(&out);
 	answered++;
 }
 

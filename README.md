@@ -52,12 +52,12 @@ example of doing so.
 
 ## Two things worth knowing before integrating
 
-**Run the responders on the sockets you actually advertise.** `UdpResponder`
-must own the very socket whose port goes in ADC's `U4`/`U6`, or the test
-measures a different port than the one that matters. Both responders expose
-their protocol handling as free functions so a client can fold them into
-listeners it already has rather than opening a second pair — see
-`TcpResponder::handleChallenge()`.
+**Run the responders on the sockets you actually advertise.** A test of any
+other socket measures a different port than the one in your `U4`/`U6`. Both
+responders expose their protocol as free functions — `handleChallenge()` and
+`handleStunProbe()` — so a client folds them into listeners it already has
+rather than opening a second pair. See
+[`docs/adc-integration.md`](docs/adc-integration.md).
 
 **Pin your source address on a multi-homed host.** A host with several
 addresses of one family has no single source address: the kernel picks one per

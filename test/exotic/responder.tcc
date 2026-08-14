@@ -470,3 +470,91 @@ EXO_TEST(udp_responder_survives_garbage, {
 	good.send(responder.getPort(), probe.encode());
 	return good.answered;
 });
+
+/* --- the UDP protocol without a socket ----------------------------------- */
+
+/*
+ * This is the path an ADC client takes: it already owns the socket it
+ * advertises in U4/U6, and must run the responder on that one, because testing
+ * any other socket measures a different port than the one that matters.
+ */
+
+EXO_TEST(handle_stun_probe_answers_an_authenticated_request, {
+	Stun::Message probe = Stun::Message::request(someTxId());
+	probe.addString(Stun::Attr::Username, "session-id");
+	probe.addMessageIntegrity(keyOf("session-password"));
+	probe.addFingerprint();
+	const std::vector<uint8_t> wire = probe.encode();
+
+	const std::optional<Stun::Endpoint> from =
+		Stun::parseEndpoint("203.0.113.7", 51343);
+	if (!from) return false;
+
+	std::vector<uint8_t> reply;
+	if (!handleStunProbe(std::span<const uint8_t>(wire.data(), wire.size()),
+	                     "session-id", "session-password", *from, reply))
+		return false;
+
+	Stun::Message response;
+	if (!Stun::Message::decode(
+	        std::span<const uint8_t>(reply.data(), reply.size()), response))
+		return false;
+
+	const std::optional<Stun::Endpoint> mapped =
+		response.getAddress(Stun::Attr::XorMappedAddress, true);
+
+	return response.type == Stun::BINDING_RESPONSE
+	    && response.txid == probe.txid
+	    && response.checkMessageIntegrity(keyOf("session-password"))
+	    && response.checkFingerprint()
+	    /* The reflexive address handed back is the one the caller observed. */
+	    && mapped && *mapped == *from;
+});
+
+EXO_TEST(handle_stun_probe_declines_everything_it_should, {
+	const std::optional<Stun::Endpoint> from =
+		Stun::parseEndpoint("203.0.113.7", 51343);
+	if (!from) return false;
+
+	auto declines = [&](const std::vector<uint8_t>& datagram,
+	                    const char* user, const char* pass) {
+		std::vector<uint8_t> reply;
+		const bool answered = handleStunProbe(
+			std::span<const uint8_t>(datagram.data(), datagram.size()),
+			user, pass, *from, reply);
+		/* A declined datagram must leave nothing to send. */
+		return !answered && reply.empty();
+	};
+
+	/* ADC search results, which must reach the application untouched. */
+	const char* adc = "URES IPJJWEPPPLCA3PF2ZCRRYO4F2ZX2EV2JMW2KCII SI1\n";
+	if (!declines(std::vector<uint8_t>(adc, adc + strlen(adc)),
+	              "session-id", "session-password"))
+		return false;
+
+	Stun::Message good = Stun::Message::request(someTxId());
+	good.addString(Stun::Attr::Username, "session-id");
+	good.addMessageIntegrity(keyOf("session-password"));
+	good.addFingerprint();
+
+	/* No session open: a client that is not being checked answers nobody. */
+	if (!declines(good.encode(), "", "")) return false;
+	/* Wrong key, and wrong username. */
+	if (!declines(good.encode(), "session-id", "wrong-password")) return false;
+	if (!declines(good.encode(), "somebody-else", "session-password")) return false;
+
+	/* Unauthenticated, which an ordinary STUN server would answer. */
+	Stun::Message anonymous = Stun::Message::request(someTxId());
+	anonymous.addFingerprint();
+	if (!declines(anonymous.encode(), "session-id", "session-password"))
+		return false;
+
+	/* A response rather than a request. */
+	Stun::Message response =
+		Stun::Message::response(Stun::Message::request(someTxId()));
+	response.addMessageIntegrity(keyOf("session-password"));
+	if (!declines(response.encode(), "session-id", "session-password"))
+		return false;
+
+	return declines({}, "session-id", "session-password");
+});

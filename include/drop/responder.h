@@ -15,7 +15,9 @@
 #include <samurai/io/net/socketevent.h>
 
 #include <memory>
+#include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace Drop {
@@ -88,6 +90,36 @@ class TcpResponder final
 		uint16_t port = 0;
 		int answered = 0;
 };
+
+/**
+ * Answer a DROP UDP probe from a datagram the caller already read.
+ *
+ * This is the entry point for an ADC client, which must run the responder on
+ * the very socket it advertises in U4/U6 - testing any other socket measures a
+ * different port than the one that matters. Call it from the existing read
+ * loop; anything it declines belongs to the application sharing the socket,
+ * which for a DC client is its own UDP search results.
+ *
+ * Silence is the answer to everything unauthenticated, which is why this
+ * reports "nothing to send" rather than an error to return. A reply to a
+ * datagram whose source was never proven is a reflection an attacker can aim
+ * anywhere, so a probe that fails MESSAGE-INTEGRITY gets nothing at all.
+ *
+ * @param datagram what was received, whole.
+ * @param username the session's STUN username, empty when no session is open,
+ *        in which case nothing is ever answered.
+ * @param password the session's STUN password.
+ * @param from where the datagram came from, which the reply reports back as
+ *        the client's reflexive address.
+ * @param reply filled with the bytes to send back to 'from'.
+ * @return true when 'reply' should be sent. False means send nothing, and
+ *         does not distinguish "not for us" from "refused" - the caller
+ *         should pass a declined datagram to whatever else uses the socket.
+ */
+bool handleStunProbe(std::span<const uint8_t> datagram,
+                     std::string_view username, std::string_view password,
+                     const Stun::Endpoint& from,
+                     std::vector<uint8_t>& reply);
 
 /**
  * Answers authenticated STUN Binding Requests on a UDP port.
