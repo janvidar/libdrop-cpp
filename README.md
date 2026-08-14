@@ -67,15 +67,19 @@ advertises. Set `CheckOptions::localAddress`.
 
 ## Status
 
-Working and verified against the live deployment at `drop.quickdc.org`:
+All three of the questions above are answered, and verified against the live
+deployment at `drop.quickdc.org` from a real NAT'd connection:
 
 - the control plane (`/v1/server`, `/v1/whoami`, `/v1/session`, `/inbound`)
 - the STUN codec, interoperating with the Go server implementation
 - the TCP challenge responder and the STUN responder
+- the UPnP check-map-recheck loop, which on a real router took the verdict
+  from `filtered` to `open`
+- `check()` and the `dropcheck` tool
 
-Not yet written: `natdisc` (RFC 5780 behaviour discovery), the UPnP
-check-map-recheck loop, the `check()` orchestrator that ties them together, and
-the test suite. The `dropcheck` tool is written but needs `check()`.
+Not yet written: RFC 5780 NAT behaviour discovery (`FamilyReport::natTested` is
+always false, and the fields are present so that a caller written against them
+need not change when it lands), and the test suite.
 
 ## The protocol
 

@@ -1,0 +1,414 @@
+/*
+ * Copyright (C) 2026 Jan Vidar Krey, janvidar@extatic.org
+ * See the file "COPYING" for licensing details.
+ */
+
+#include <drop/check.h>
+
+#include <drop/client.h>
+#include <drop/responder.h>
+#include "pump.h"
+
+#include <samurai/io/net/socket.h>
+#include <samurai/io/net/socketaddress.h>
+#include <samurai/io/net/socketevent.h>
+
+#include <string.h>
+
+/*
+ * The whole flow, in the order the specification requires it:
+ *
+ *   capabilities -> reflexive address -> arm the listeners -> open a session
+ *   -> ask for the probes -> apply the decision table
+ *
+ * Two orderings here are load-bearing rather than incidental. The listeners
+ * are armed before the session is opened, because the server connects back
+ * while the /inbound request is outstanding and a client that asks first races
+ * the probe against its own bind. And the inbound test runs before anything
+ * else touches the server's STUN endpoints, because once a client has sent to
+ * them a NAT doing address-dependent filtering will let a datagram through
+ * that it would have dropped from a stranger.
+ */
+
+namespace Drop {
+
+namespace {
+
+/** Collects the one event each control-plane request produces. */
+class Collector final : public ClientEventHandler
+{
+	public:
+		bool done = false;
+		bool ok = false;
+		ErrorInfo error;
+
+		ServerInfo server;
+		Whoami whoami;
+		Session session;
+		InboundResult inbound;
+
+		void reset() { done = false; ok = false; error = ErrorInfo(); }
+
+	protected:
+		void EventDropServerInfo(Client*, const ServerInfo& value) override
+		{ server = value; ok = true; done = true; }
+
+		void EventDropWhoami(Client*, const Whoami& value) override
+		{ whoami = value; ok = true; done = true; }
+
+		void EventDropSession(Client*, const Session& value) override
+		{ session = value; ok = true; done = true; }
+
+		void EventDropInbound(Client*, const InboundResult& value) override
+		{ inbound = value; ok = true; done = true; }
+
+		void EventDropError(Client*, const ErrorInfo& info) override
+		{ error = info; ok = false; done = true; }
+};
+
+/** Run one request to completion. */
+bool await(Collector& events, std::chrono::milliseconds timeout)
+{
+	pump([&] { return events.done; }, timeout);
+	if (!events.done)
+	{
+		events.error.error = Error::Transport;
+		events.error.detail = "the server did not answer in time";
+	}
+	return events.ok;
+}
+
+/** The egress test: positive evidence on every port, never a bare connect. */
+class EgressProbe final : public Samurai::IO::Net::SocketEventHandler
+{
+	public:
+		bool finished = false;
+		bool reached = false;
+		std::string detail;
+
+		void run(const std::string& host, uint16_t port,
+		         const std::optional<Samurai::IO::Net::InetAddress>& localAddress,
+		         std::chrono::milliseconds timeout)
+		{
+			socket = Samurai::IO::Net::Socket::create(this, host, port);
+			if (!socket)
+			{
+				finished = true;
+				detail = "no socket";
+				return;
+			}
+			if (localAddress)
+				socket->setLocalAddress(*localAddress);
+			socket->setConnectTimeout(timeout);
+			socket->connect();
+
+			pump([&] { return finished; }, timeout);
+			if (!finished)
+				detail = "timed out";
+
+			socket->setEventHandler(nullptr);
+			socket->disableMonitor();
+			socket.reset();
+		}
+
+	protected:
+		void EventDataAvailable(const Samurai::IO::Net::Socket* which) override
+		{
+			char buf[64];
+			size_t got = 0;
+			std::error_code ec;
+			Samurai::IO::Net::Socket* s =
+				const_cast<Samurai::IO::Net::Socket*>(which);
+			if (s->read(buf, sizeof(buf) - 1, got, ec) != Samurai::IO::ReadResult::Ok)
+			{
+				finished = true;
+				return;
+			}
+			buf[got] = 0;
+
+			/*
+			 * A bare connect proves nothing: the usual cause of blocked egress
+			 * is a transparent proxy or captive portal that accepts the
+			 * connection itself. Only the banner distinguishes the two.
+			 */
+			reached = (strncmp(buf, "DROP/1 EGRESS ", 14) == 0);
+			if (!reached)
+				detail = "something answered, but not this service";
+			finished = true;
+		}
+
+		void EventDisconnected(const Samurai::IO::Net::Socket*) override
+		{
+			if (!reached && detail.empty())
+				detail = "connected but no banner";
+			finished = true;
+		}
+
+		void EventTimeout(const Samurai::IO::Net::Socket*) override
+		{
+			detail = "connection timed out";
+			finished = true;
+		}
+
+		void EventError(const Samurai::IO::Net::Socket*,
+		                Samurai::IO::Net::SocketError, const char* msg) override
+		{
+			detail = msg ? msg : "connection failed";
+			finished = true;
+		}
+
+	private:
+		std::shared_ptr<Samurai::IO::Net::Socket> socket;
+};
+
+std::vector<EgressResult> testEgress(const ServerInfo& server, Family family,
+                                     const CheckOptions& options)
+{
+	std::vector<EgressResult> out;
+
+	const std::string host =
+		family == Family::IPv6 ? server.egressIPv6 : server.egressIPv4;
+	if (host.empty())
+		return out;
+
+	for (uint16_t port : server.egressBannerPorts)
+	{
+		EgressProbe probe;
+		probe.run(host, port, options.localAddress, std::chrono::seconds(5));
+
+		EgressResult result;
+		result.port = port;
+		result.reached = probe.reached;
+		result.detail = probe.detail;
+		out.push_back(std::move(result));
+	}
+
+	return out;
+}
+
+std::string bindAddressFor(const CheckOptions& options)
+{
+	return options.localAddress ? options.localAddress->toString() : std::string();
+}
+
+} // namespace
+
+std::string familyUrl(const std::string& baseUrl, Family family)
+{
+	std::string base = baseUrl;
+	while (!base.empty() && base.back() == '/')
+		base.pop_back();
+
+	const std::string prefix = (family == Family::IPv6) ? "ipv6." : "ipv4.";
+
+	for (const char* scheme : { "https://", "http://" })
+	{
+		const size_t n = strlen(scheme);
+		if (base.compare(0, n, scheme) == 0)
+			return std::string(scheme) + prefix + base.substr(n);
+	}
+	return prefix + base;
+}
+
+FamilyReport checkFamily(const std::string& baseUrl, Family family,
+                         const CheckOptions& options)
+{
+	FamilyReport report;
+	report.family = family;
+	report.baseUrl = familyUrl(baseUrl, family);
+
+	Client::Options clientOptions;
+	clientOptions.timeout = options.timeout;
+	clientOptions.inboundTimeout = options.inboundTimeout;
+	clientOptions.userAgent = options.userAgent;
+	clientOptions.localAddress = options.localAddress;
+	clientOptions.allowUntrustedCertificate = options.allowUntrustedCertificate;
+
+	Collector events;
+	Client client(&events, report.baseUrl, family, clientOptions);
+
+	/* Capabilities, which also confirms this is a DROP server rather than
+	   something that answers 200 to everything. */
+	events.reset();
+	client.requestServerInfo();
+	if (!await(events, options.timeout))
+	{
+		report.error = events.error;
+		return report;
+	}
+	report.server = events.server;
+
+	/* The reflexive address. Half of what the caller came for, and free. */
+	events.reset();
+	client.requestWhoami();
+	if (!await(events, options.timeout))
+	{
+		report.error = events.error;
+		return report;
+	}
+	report.whoami = events.whoami;
+
+	/*
+	 * Arm the listeners before opening the session. The server connects back
+	 * while /inbound is outstanding, so binding afterwards races the probe.
+	 */
+	const std::string bindAddress = bindAddressFor(options);
+
+	TcpResponder tcp;
+	if (!tcp.listen(family, bindAddress, options.tcpPort))
+	{
+		report.error.error = Error::Local;
+		report.error.detail = "could not listen for the TCP challenge";
+		return report;
+	}
+
+	UdpResponder udp;
+	const bool wantUdp = report.server.supports(family, "udp");
+	if (wantUdp && !udp.listen(family, bindAddress, options.udpPort))
+	{
+		report.error.error = Error::Local;
+		report.error.detail = "could not listen for the UDP probe";
+		return report;
+	}
+
+	events.reset();
+	client.openSession();
+	if (!await(events, options.timeout))
+	{
+		report.error = events.error;
+		return report;
+	}
+	const Session session = events.session;
+
+	/* The responder must hold the credentials before the probe arrives, and
+	   must answer nothing else. */
+	if (wantUdp)
+		udp.setCredentials(session.username, session.password);
+
+	std::vector<uint16_t> tcpPorts{ tcp.getPort() };
+	std::vector<uint16_t> udpPorts;
+	if (wantUdp)
+		udpPorts.push_back(udp.getPort());
+
+	events.reset();
+	client.requestInbound(session, tcpPorts, udpPorts);
+	if (!await(events, options.inboundTimeout))
+	{
+		report.error = events.error;
+		return report;
+	}
+	report.inbound = events.inbound;
+
+	const PortResult* tcpResult = report.inbound.findTcp(tcp.getPort());
+	const PortResult* udpResult = wantUdp ? report.inbound.findUdp(udp.getPort())
+	                                      : nullptr;
+	report.decision = decide(family, report.whoami.classification,
+	                         tcpResult, udpResult, tcp.getPort());
+
+	/*
+	 * UPnP, and then the whole inbound test again. Asking the gateway is the
+	 * easy half; finding out whether it made any difference is the half that
+	 * needs a second measurement from outside.
+	 */
+	if (options.useUpnp && report.decision.mode != Mode::Active &&
+	    Upnp::isApplicable(family))
+	{
+		report.upnpAttempted = true;
+		report.inboundBeforeUpnp = report.inbound;
+		report.decisionBeforeUpnp = report.decision;
+
+		report.upnp = Upnp::addMapping(tcp.getPort(),
+		                               wantUdp ? udp.getPort() : 0,
+		                               bindAddress, options.upnp);
+
+		if (report.upnp.mappingAdded)
+		{
+			/* A second session: the first is spent, single use being what
+			   stops the rate limit from being a formality. */
+			events.reset();
+			client.openSession();
+			if (await(events, options.timeout))
+			{
+				const Session second = events.session;
+				if (wantUdp)
+					udp.setCredentials(second.username, second.password);
+
+				events.reset();
+				client.requestInbound(second, tcpPorts, udpPorts);
+				if (await(events, options.inboundTimeout))
+				{
+					report.inbound = events.inbound;
+
+					const PortResult* t = report.inbound.findTcp(tcp.getPort());
+					const PortResult* u = wantUdp
+						? report.inbound.findUdp(udp.getPort()) : nullptr;
+					report.decision = decide(family, report.whoami.classification,
+					                         t, u, tcp.getPort());
+				}
+			}
+
+			const bool helped = report.decision.mode == Mode::Active;
+			if (helped)
+			{
+				report.upnp.summary = "The gateway granted a mapping and it "
+				                      "worked: inbound connections now reach you.";
+				report.upnp.retained = options.keepMapping;
+			}
+			else
+			{
+				/*
+				 * The interesting failure, and the reason this loop exists: the
+				 * router said yes and it changed nothing, which almost always
+				 * means a second NAT upstream.
+				 */
+				report.upnp.summary = "The gateway granted a mapping, but you "
+				                      "still cannot be reached through it. There "
+				                      "is very likely another NAT above your "
+				                      "router, which no port forward here can "
+				                      "get past.";
+				report.upnp.retained = false;
+			}
+
+			if (!report.upnp.retained)
+			{
+				/* A forward to a port that could not be reached through it has
+				   no upside and is a hole somebody has to notice later. */
+				Upnp::removeMapping(report.upnp.tcpExternalPort,
+				                    report.upnp.udpExternalPort,
+				                    options.upnp);
+			}
+		}
+	}
+
+	if (options.testEgress)
+		report.egress = testEgress(report.server, family, options);
+
+	/*
+	 * Once the check is over the responder should stop answering: the
+	 * credentials are spent, and a client that keeps answering is a service
+	 * nobody asked it to run.
+	 */
+	udp.clearCredentials();
+
+	return report;
+}
+
+Report check(const std::string& baseUrl, const CheckOptions& options)
+{
+	Report report;
+	report.server = baseUrl;
+
+	std::vector<Decision> decisions;
+	for (Family family : options.families)
+	{
+		FamilyReport fr = checkFamily(baseUrl, family, options);
+		if (fr.error.ok())
+			decisions.push_back(fr.decision);
+		report.families.push_back(std::move(fr));
+	}
+
+	report.advice = combine(decisions);
+	return report;
+}
+
+}

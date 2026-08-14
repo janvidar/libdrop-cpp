@@ -45,7 +45,9 @@ set(DROP_SOURCES
     src/client.cpp
     src/hmac.cpp
     src/stun.cpp
-    src/responder.cpp)
+    src/responder.cpp
+    src/upnp.cpp
+    src/check.cpp)
 
 add_library(drop STATIC ${DROP_SOURCES})
 add_library(drop::drop ALIAS drop)

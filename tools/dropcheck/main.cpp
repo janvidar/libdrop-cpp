@@ -17,6 +17,7 @@
 #include <samurai/io/net/inetaddress.h>
 
 #include <stdio.h>
+#include <ctype.h>
 #include <string.h>
 
 #include <string>
@@ -78,6 +79,31 @@ void wrap(const std::string& text, int indent)
 	if (!first) printf("%s\n", line.c_str());
 }
 
+/** A bullet whose continuation lines hang under the text, not the marker. */
+void wrapBullet(const std::string& text, int indent)
+{
+	printf("%*s- ", indent, "");
+	/* The first line is already positioned, so only the rest is indented. */
+	std::string body = text;
+	const size_t width = 78 - (size_t) indent - 2;
+	size_t start = 0;
+	bool first = true;
+	while (start < body.size())
+	{
+		size_t take = body.size() - start;
+		if (take > width)
+		{
+			size_t brk = body.rfind(' ', start + width);
+			take = (brk != std::string::npos && brk > start) ? brk - start : width;
+		}
+		if (!first) printf("%*s", indent + 2, "");
+		printf("%.*s\n", (int) take, body.c_str() + start);
+		start += take;
+		while (start < body.size() && body[start] == ' ') start++;
+		first = false;
+	}
+}
+
 void printFamily(const Drop::FamilyReport& report)
 {
 	printf("== %s ==\n", report.family == Drop::Family::IPv6 ? "IPV6" : "IPV4");
@@ -132,14 +158,41 @@ void printFamily(const Drop::FamilyReport& report)
 
 	if (report.upnpAttempted)
 	{
-		printf("\n  UPnP:            %s\n", report.upnp.summary.c_str());
+		printf("\n  UPnP:\n");
 		if (report.upnp.mappingAdded)
-			printf("                   external port %u -> %u (%s)\n",
-			       report.upnp.externalPort, report.upnp.internalPort,
+		{
+			if (report.upnp.tcpExternalPort)
+				printf("    mapped TCP %u -> %u\n", report.upnp.tcpExternalPort,
+				       report.upnp.tcpInternalPort);
+			if (report.upnp.udpExternalPort)
+				printf("    mapped UDP %u -> %u\n", report.upnp.udpExternalPort,
+				       report.upnp.udpInternalPort);
+
+			/* The before and after, which is the only evidence the mapping did
+			   anything: a router reports success either way. */
+			for (const Drop::PortResult& before : report.inboundBeforeUpnp.tcp)
+			{
+				const Drop::PortResult* after = report.inbound.findTcp(before.port);
+				if (after && after->verdict != before.verdict)
+					printf("    TCP %u: %s -> %s\n", before.port,
+					       toString(before.verdict), toString(after->verdict));
+			}
+			for (const Drop::PortResult& before : report.inboundBeforeUpnp.udp)
+			{
+				const Drop::PortResult* after = report.inbound.findUdp(before.port);
+				if (after && after->verdict != before.verdict)
+					printf("    UDP %u: %s -> %s\n", before.port,
+					       toString(before.verdict), toString(after->verdict));
+			}
+			printf("    mapping %s\n",
 			       report.upnp.retained ? "left in place" : "removed again");
+		}
+		wrap(report.upnp.summary, 4);
 	}
 
-	printf("\n  VERDICT:         %s\n", toString(report.decision.mode));
+	std::string mode = toString(report.decision.mode);
+	for (char& c : mode) c = (char) toupper((unsigned char) c);
+	printf("\n  VERDICT:         %s\n", mode.c_str());
 	wrap(report.decision.reason, 2);
 	if (!report.decision.note.empty())
 		wrap(report.decision.note, 2);
@@ -148,7 +201,7 @@ void printFamily(const Drop::FamilyReport& report)
 	{
 		printf("\n  What to try:\n");
 		for (const std::string& remedy : report.decision.remedies)
-			wrap("- " + remedy, 4);
+			wrapBullet(remedy, 4);
 	}
 	printf("\n");
 }
