@@ -112,3 +112,29 @@ endif()
 
 install(TARGETS drop EXPORT dropTargets ARCHIVE DESTINATION lib)
 install(DIRECTORY include/drop DESTINATION include)
+
+# The export set itself, without which the two lines above install an archive
+# and its headers that nothing can find. It also has to be installed for another
+# CMake project to be able to link this at all while exporting a target of its
+# own: a static library does not link its dependencies, so drop appears in that
+# project's link interface and CMake refuses to export a target requiring one
+# that is in no export set.
+include(CMakePackageConfigHelpers)
+
+install(EXPORT dropTargets
+    FILE dropTargets.cmake
+    NAMESPACE drop::
+    DESTINATION lib/cmake/drop)
+
+configure_package_config_file(cmake/dropConfig.cmake.in
+    "${CMAKE_CURRENT_BINARY_DIR}/dropConfig.cmake"
+    INSTALL_DESTINATION lib/cmake/drop)
+
+write_basic_package_version_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/dropConfigVersion.cmake"
+    COMPATIBILITY SameMinorVersion)
+
+install(FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/dropConfig.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/dropConfigVersion.cmake"
+    DESTINATION lib/cmake/drop)

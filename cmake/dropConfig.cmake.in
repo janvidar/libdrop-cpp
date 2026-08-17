@@ -1,0 +1,17 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+# The drop target carries samurai as a PUBLIC link dependency: everything this
+# library does with a socket, a TLS session, an HTTP request or a hash comes
+# from there, and its public headers name samurai types.
+find_dependency(samurai)
+
+# zlib is a PRIVATE dependency, for the crc32 the STUN FINGERPRINT attribute
+# uses. A static archive does not link its dependencies, so it appears in the
+# static target's link interface and a consumer has to resolve it as well.
+find_dependency(ZLIB)
+
+include("${CMAKE_CURRENT_LIST_DIR}/dropTargets.cmake")
+
+check_required_components(drop)
