@@ -14,22 +14,39 @@ option(DROP_BUILD_TESTS "Build the test suite" ON)
 
 # ---------------------------------------------------------------------------
 # Samurai supplies the sockets, the TLS, the HTTP client, the UPnP gateway and
-# now the JSON. Either an installed package or a source tree beside this one.
+# now the JSON. Three places to find it, in the order that costs least.
+#
+# A superproject that has already added Samurai is asked first, before anything
+# else is looked at. Adding it a second time would not give a second library -
+# the target names are global, so it stops the configure - and that is exactly
+# what a build holding this and Samurai side by side would have done.
 # ---------------------------------------------------------------------------
-find_package(samurai QUIET)
+set(SAMURAI_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../samurai"
+    CACHE PATH "Path to a Samurai source tree, when it is not provided or installed")
 
-if(NOT samurai_FOUND)
-    set(SAMURAI_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../samurai"
-        CACHE PATH "Path to a Samurai source tree, when it is not installed")
-    if(EXISTS "${SAMURAI_SOURCE_DIR}/CMakeLists.txt")
-        message(STATUS "libdrop-cpp: building Samurai from ${SAMURAI_SOURCE_DIR}")
-        add_subdirectory("${SAMURAI_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/samurai"
-            EXCLUDE_FROM_ALL)
-    else()
-        message(FATAL_ERROR
-            "libdrop-cpp: Samurai was not found. Install it, or set "
-            "SAMURAI_SOURCE_DIR to a checkout of "
-            "ssh://git@gitea.extatic.org:2222/janvidar/samurai.git")
+if(NOT TARGET samurai::samurai)
+    find_package(samurai QUIET)
+
+    if(NOT samurai_FOUND)
+        if(EXISTS "${SAMURAI_SOURCE_DIR}/CMakeLists.txt")
+            message(STATUS "libdrop-cpp: building Samurai from ${SAMURAI_SOURCE_DIR}")
+
+            # Samurai's own suite is not part of a libdrop-cpp build, and asking
+            # for it here is not merely wasteful: this adds Samurai
+            # EXCLUDE_FROM_ALL, so its test binary would be registered with ctest
+            # and then never built, leaving a test that reports Not Run for as
+            # long as it is configured. Configure Samurai on its own for those.
+            set(SAMURAI_BUILD_TESTS OFF CACHE BOOL
+                "Build the samurai test programs" FORCE)
+
+            add_subdirectory("${SAMURAI_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/samurai"
+                EXCLUDE_FROM_ALL)
+        else()
+            message(FATAL_ERROR
+                "libdrop-cpp: Samurai was not found. Install it, or clone it beside "
+                "this checkout - from the same host this came from - or set "
+                "SAMURAI_SOURCE_DIR to a checkout of it.")
+        endif()
     endif()
 endif()
 

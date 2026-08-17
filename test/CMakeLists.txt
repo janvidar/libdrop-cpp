@@ -1,18 +1,24 @@
 #
 ## Tests for libdrop-cpp
 #
-# The exotic suite, the same framework Samurai and uhub use. It arrives one of
-# three ways: already defined, because Samurai was added as a subdirectory and
-# brought it in; from a Samurai source tree beside this one; or as an installed
-# package. When none of those works the suite is skipped rather than failing
-# the build, since a checkout without it can still produce the library.
+# The exotic suite, the same framework Samurai and QuickDC build theirs through.
+# It arrives one of three ways: already defined, because whoever is building
+# added it; from a checkout beside this one; or as an installed package. When
+# none of those works the suite is skipped rather than failing the build, since
+# a checkout without it can still produce the library.
+#
+# Beside this one rather than inside Samurai. Exotic belongs to whoever is
+# building rather than to any one of the libraries built through it, so a copy
+# owned by one of them would be a copy the others reach inside a sibling's
+# vendor directory for.
 #
 
+set(EXOTIC_SOURCE_DIR "${PROJECT_SOURCE_DIR}/../exotic" CACHE PATH
+    "Where the exotic test framework is checked out, when it is not installed")
+
 if(NOT COMMAND exotic_add_tests)
-    if(DEFINED SAMURAI_SOURCE_DIR AND
-       EXISTS "${SAMURAI_SOURCE_DIR}/third_party/exotic/CMakeLists.txt")
-        add_subdirectory("${SAMURAI_SOURCE_DIR}/third_party/exotic"
-            "${CMAKE_CURRENT_BINARY_DIR}/exotic")
+    if(EXISTS "${EXOTIC_SOURCE_DIR}/CMakeLists.txt")
+        add_subdirectory("${EXOTIC_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/exotic")
     else()
         find_package(Exotic QUIET)
     endif()
@@ -20,9 +26,9 @@ endif()
 
 if(NOT COMMAND exotic_add_tests)
     message(STATUS
-        "libdrop-cpp: exotic not found - skipping the test suite. Point "
-        "SAMURAI_SOURCE_DIR at a Samurai checkout with its submodules, or "
-        "install exotic.")
+        "libdrop-cpp: exotic not found - skipping the test suite. Clone it beside "
+        "this checkout, from the same host this came from, or set "
+        "EXOTIC_SOURCE_DIR, or install it.")
     return()
 endif()
 
