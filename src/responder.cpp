@@ -30,9 +30,11 @@ constexpr const char* RESPONSE_PREFIX  = "DROP/1 RESPONSE ";
  * The line cap the protocol fixes.
  *
  * Both sides enforce it and neither reads further, so a peer that never sends
- * a newline cannot make the other buffer.
+ * a newline cannot make the other buffer. Taken from the published constant
+ * rather than restated, so that a client sizing its own buffer from the header
+ * and this reader cannot disagree about the bound.
  */
-constexpr size_t MAX_LINE = 128;
+constexpr size_t MAX_LINE = TcpResponder::MaxChallenge;
 
 /** Answers per second, above which a flood is dropped rather than reflected. */
 constexpr int ANSWERS_PER_SECOND = 20;

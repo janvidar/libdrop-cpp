@@ -65,8 +65,20 @@ class TcpResponder final
 		int getAnswered() const { return answered; }
 
 		/**
+		 * The most a challenge line can be.
+		 *
+		 * Here rather than inside the implementation because a client sharing its
+		 * own listener has to size the buffer it demultiplexes on: a line is
+		 * recognised by its prefix but answered by echoing the nonce inside it, so
+		 * a buffer that holds only enough to recognise one cannot answer it, and
+		 * the port then looks closed to every check that ever probes it.
+		 */
+		static constexpr size_t MaxChallenge = 128;
+
+		/**
 		 * Turn a challenge line into its response.
 		 *
+		 * @param line at most MaxChallenge bytes of it, terminator optional.
 		 * @return false when the line is not a DROP challenge, in which case the
 		 *         bytes belong to whatever else shares the port.
 		 */
