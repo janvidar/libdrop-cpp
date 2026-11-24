@@ -60,7 +60,7 @@ class GatewaySession final
 				return false;
 			}
 
-			mapper = UPnP::PortMapper::create(loop, this, gateway.get(), mapperOptions());
+			mapper = UPnP::PortMapper::create(this, gateway.get(), mapperOptions());
 			return mapper != nullptr;
 		}
 
