@@ -8,6 +8,7 @@
 
 #include "pump.h"
 
+#include <samurai/eventloop.h>
 #include <samurai/io/net/datagram.h>
 #include <samurai/io/net/socketaddress.h>
 #include <samurai/io/net/socketevent.h>
@@ -30,6 +31,18 @@
  * two addresses RFC 5780 needs. Where the platform has only one, the cases
  * skip rather than fail.
  */
+
+static std::unique_ptr<Samurai::EventLoop> loop;
+
+EXO_SETUP({
+	loop = std::make_unique<Samurai::EventLoop>();
+	return loop->isValid() ? 1 : 0;
+});
+
+EXO_TEARDOWN({
+	loop.reset();
+	return 1;
+});
 
 namespace {
 
@@ -172,7 +185,7 @@ class FakeServer final : public Samurai::IO::Net::DatagramEventHandler
 		bool bindOne(Role role, const char* address)
 		{
 			const InetSocketAddress addr(InetAddress(address), (uint16_t) 0);
-			auto socket = DatagramSocket::create(this, addr);
+			auto socket = DatagramSocket::create(*loop, this, addr);
 			if (!socket || socket->getFD() == -1 || !socket->listen())
 				return false;
 
@@ -188,7 +201,7 @@ class FakeServer final : public Samurai::IO::Net::DatagramEventHandler
 			const uint16_t wanted = ports[Role::Primary];
 			const InetSocketAddress addr(InetAddress("127.0.0.2"), wanted);
 
-			auto socket = DatagramSocket::create(this, addr);
+			auto socket = DatagramSocket::create(*loop, this, addr);
 			if (!socket || socket->getFD() == -1 || !socket->listen())
 				return false;   /* the port is taken on that address */
 
@@ -245,7 +258,7 @@ class FakeServer final : public Samurai::IO::Net::DatagramEventHandler
 bool haveSecondLoopback()
 {
 	const InetSocketAddress addr(InetAddress("127.0.0.2"), (uint16_t) 0);
-	auto probe = DatagramSocket::create(nullptr, addr);
+	auto probe = DatagramSocket::create(*loop, nullptr, addr);
 	return probe && probe->getFD() != -1;
 }
 
@@ -271,7 +284,7 @@ EXO_TEST(natdisc_no_nat_when_the_mapped_address_is_our_own, {
 	server.mappedAddress[Role::AltBoth] = "127.0.0.1";
 	if (!server.start()) return true;
 
-	const NatResult result = NatDiscovery::discover(optionsFor(server));
+	const NatResult result = NatDiscovery::discover(*loop, optionsFor(server));
 
 	return result.mapping == Behaviour::None
 	    && result.filtering == Behaviour::EndpointIndependent;
@@ -287,7 +300,7 @@ EXO_TEST(natdisc_endpoint_independent_mapping, {
 	server.mappedAddress[Role::AltBoth] = "203.0.113.7";
 	if (!server.start()) return true;
 
-	const NatResult result = NatDiscovery::discover(optionsFor(server));
+	const NatResult result = NatDiscovery::discover(*loop, optionsFor(server));
 
 	return result.mapping == Behaviour::EndpointIndependent
 	    && result.holePunchLikely();
@@ -304,7 +317,7 @@ EXO_TEST(natdisc_address_dependent_mapping, {
 	server.mappedAddress[Role::AltBoth] = "203.0.113.8";
 	if (!server.start()) return true;
 
-	const NatResult result = NatDiscovery::discover(optionsFor(server));
+	const NatResult result = NatDiscovery::discover(*loop, optionsFor(server));
 
 	return result.mapping == Behaviour::AddressDependent
 	    /* Endpoint-independent mapping is the precondition for hole
@@ -322,7 +335,7 @@ EXO_TEST(natdisc_address_and_port_dependent_mapping, {
 	server.mappedAddress[Role::AltBoth] = "203.0.113.9";
 	if (!server.start()) return true;
 
-	const NatResult result = NatDiscovery::discover(optionsFor(server));
+	const NatResult result = NatDiscovery::discover(*loop, optionsFor(server));
 
 	return result.mapping == Behaviour::AddressAndPortDependent
 	    && !result.holePunchLikely();
@@ -333,7 +346,7 @@ EXO_TEST(natdisc_reports_blocked_when_nothing_answers, {
 	server.silent = true;
 	if (!server.start()) return true;
 
-	const NatResult result = NatDiscovery::discover(optionsFor(server));
+	const NatResult result = NatDiscovery::discover(*loop, optionsFor(server));
 
 	/*
 	 * With the control plane working, silence from the primary endpoint means
@@ -353,7 +366,7 @@ EXO_TEST(natdisc_without_other_address_classifies_nothing, {
 	server.mappedAddress[Role::Primary] = "203.0.113.7";
 	if (!server.start()) return true;
 
-	const NatResult result = NatDiscovery::discover(optionsFor(server));
+	const NatResult result = NatDiscovery::discover(*loop, optionsFor(server));
 
 	/* Most public STUN servers are this server. Saying so is the useful
 	   outcome; guessing is not. */
@@ -378,7 +391,7 @@ EXO_TEST(natdisc_a_refused_change_request_is_unknown_not_restrictive, {
 	server.mappedAddress[Role::AltBoth] = "203.0.113.7";
 	if (!server.start()) return true;
 
-	const NatResult result = NatDiscovery::discover(optionsFor(server));
+	const NatResult result = NatDiscovery::discover(*loop, optionsFor(server));
 
 	if (result.filtering == Behaviour::AddressAndPortDependent)
 		return false;
@@ -398,7 +411,7 @@ EXO_TEST(natdisc_endpoint_independent_filtering, {
 	server.mappedAddress[Role::AltBoth] = "203.0.113.7";
 	if (!server.start()) return true;
 
-	const NatResult result = NatDiscovery::discover(optionsFor(server));
+	const NatResult result = NatDiscovery::discover(*loop, optionsFor(server));
 
 	/* Loopback admits the reply from the changed address, which is what an
 	   endpoint-independent filter does. */
@@ -421,7 +434,7 @@ EXO_TEST(natdisc_refuses_an_alternate_that_is_not_different, {
 	 */
 	options.primary = server.endpointOf(Role::AltBoth);
 
-	const NatResult result = NatDiscovery::discover(options);
+	const NatResult result = NatDiscovery::discover(*loop, options);
 
 	return result.mapping == Behaviour::Unknown && !result.notes.empty();
 });
@@ -434,7 +447,7 @@ EXO_TEST(natdisc_reports_port_preservation, {
 	server.mappedPort = 12345;   /* not the client's local port */
 	if (!server.start()) return true;
 
-	const NatResult result = NatDiscovery::discover(optionsFor(server));
+	const NatResult result = NatDiscovery::discover(*loop, optionsFor(server));
 	if (result.portPreserving)
 		return false;
 
@@ -455,7 +468,7 @@ EXO_TEST(natdisc_notes_an_unpinned_source_address, {
 	NatDiscovery::Options options = optionsFor(server);
 	options.localAddress.clear();
 
-	const NatResult result = NatDiscovery::discover(options);
+	const NatResult result = NatDiscovery::discover(*loop, options);
 
 	bool warned = false;
 	for (const std::string& note : result.notes)
@@ -468,7 +481,7 @@ EXO_TEST(natdisc_notes_an_unpinned_source_address, {
 
 EXO_TEST(natdisc_without_an_endpoint_does_nothing, {
 	NatDiscovery::Options options;   /* no primary endpoint at all */
-	const NatResult result = NatDiscovery::discover(options);
+	const NatResult result = NatDiscovery::discover(*loop, options);
 
 	return result.mapping == Behaviour::Unknown
 	    && result.filtering == Behaviour::Unknown

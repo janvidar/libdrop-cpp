@@ -74,13 +74,13 @@ magic cookie, while every ADC message starts with an ASCII context letter.
 
 `Drop::check()` exists and is one call, but it is **blocking** and opens its own
 ephemeral sockets, so it is for tools rather than for you. Drive `Drop::Client`
-from your existing `SocketMonitor` instead:
+from your existing event loop instead:
 
 ```cpp
 Drop::Client::Options options;
 options.localAddress = myAdvertisedAddress;   // see below
 
-Drop::Client client(this, "https://ipv4.drop.quickdc.org",
+Drop::Client client(loop, this, "https://ipv4.drop.quickdc.org",
                     Drop::Family::IPv4, options);
 
 client.requestServerInfo();   // confirms it is a DROP server

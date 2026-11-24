@@ -32,7 +32,8 @@ class GatewaySession final
 	, public UPnP::PortMapperEventHandler
 {
 	public:
-		explicit GatewaySession(const UpnpOptions& options) : options(options) { }
+		GatewaySession(Samurai::EventLoop& loop, const UpnpOptions& options)
+			: loop(loop), options(options) { }
 
 		bool discover()
 		{
@@ -40,7 +41,7 @@ class GatewaySession final
 			gwOptions.searchTimeout = options.searchTimeout;
 			gwOptions.httpTimeout = options.actionTimeout;
 
-			gateway = UPnP::Gateway::discover(this, gwOptions);
+			gateway = UPnP::Gateway::discover(loop, this, gwOptions);
 			if (!gateway)
 			{
 				result.error = "the gateway search could not be started";
@@ -49,7 +50,7 @@ class GatewaySession final
 
 			/* The search timeout plus room for fetching the description, which
 			   is a separate HTTP request to the device. */
-			pump([&] { return finished; },
+			pump(loop, [&] { return finished; },
 			     options.searchTimeout + options.actionTimeout);
 
 			if (!result.gatewayFound)
@@ -59,7 +60,7 @@ class GatewaySession final
 				return false;
 			}
 
-			mapper = UPnP::PortMapper::create(this, gateway.get(), mapperOptions());
+			mapper = UPnP::PortMapper::create(loop, this, gateway.get(), mapperOptions());
 			return mapper != nullptr;
 		}
 
@@ -68,7 +69,7 @@ class GatewaySession final
 		{
 			finished = false;
 			failed = false;
-			pump([&] { return finished; }, options.actionTimeout);
+			pump(loop, [&] { return finished; }, options.actionTimeout);
 			return finished && !failed;
 		}
 
@@ -151,6 +152,7 @@ class GatewaySession final
 		}
 
 	private:
+		Samurai::EventLoop& loop;
 		UpnpOptions options;
 		std::unique_ptr<UPnP::Gateway> gateway;
 		std::unique_ptr<UPnP::PortMapper> mapper;
@@ -209,11 +211,11 @@ bool Upnp::isApplicable(Family family)
 	return family == Family::IPv4;
 }
 
-UpnpResult Upnp::addMapping(uint16_t tcpPort, uint16_t udpPort,
+UpnpResult Upnp::addMapping(Samurai::EventLoop& loop, uint16_t tcpPort, uint16_t udpPort,
                             const std::string& internalAddress,
                             const Options& options)
 {
-	GatewaySession session(options);
+	GatewaySession session(loop, options);
 
 	if (!session.discover())
 	{
@@ -291,9 +293,10 @@ UpnpResult Upnp::addMapping(uint16_t tcpPort, uint16_t udpPort,
 	return result;
 }
 
-bool Upnp::removeMapping(uint16_t tcpPort, uint16_t udpPort, const Options& options)
+bool Upnp::removeMapping(Samurai::EventLoop& loop, uint16_t tcpPort, uint16_t udpPort,
+                         const Options& options)
 {
-	GatewaySession session(options);
+	GatewaySession session(loop, options);
 	if (!session.discover())
 		return false;
 

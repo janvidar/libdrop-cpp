@@ -9,6 +9,7 @@
 #include <drop/types.h>
 #include <drop/upnp.h>
 
+#include <samurai/eventloop.h>
 #include <samurai/io/net/inetaddress.h>
 
 #include <chrono>
@@ -128,19 +129,21 @@ struct Report
 /**
  * Run the whole flow and return what it found.
  *
- * Synchronous: it drives the socket monitor, so it MUST NOT be called from
- * inside an event handler nor from a thread already running the event loop.
- * A client with its own loop should use Drop::Client and the responders
+ * Synchronous: it drives the loop it is given, so it MUST NOT be called from
+ * inside an event handler nor while that loop is being run elsewhere. A client
+ * that runs its loop itself should use Drop::Client and the responders
  * directly; src/check.cpp is the worked example of doing that.
  *
+ * @param loop the loop every socket, timer and request of the run is made on.
  * @param baseUrl the dual-stack base, e.g. "https://drop.example.org". The
  *        family-specific names are derived by prefixing "ipv4." and "ipv6.",
  *        which is what makes the family under test unambiguous.
  */
-Report check(const std::string& baseUrl, const CheckOptions& options = CheckOptions());
+Report check(Samurai::EventLoop& loop, const std::string& baseUrl,
+             const CheckOptions& options = CheckOptions());
 
 /** Run one family, for a caller that wants them separately. */
-FamilyReport checkFamily(const std::string& baseUrl, Family family,
+FamilyReport checkFamily(Samurai::EventLoop& loop, const std::string& baseUrl, Family family,
                          const CheckOptions& options = CheckOptions());
 
 /** Turn "https://drop.example.org" into "https://ipv4.drop.example.org". */

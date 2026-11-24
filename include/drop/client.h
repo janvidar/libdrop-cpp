@@ -88,12 +88,14 @@ class Client final : public Samurai::IO::Net::HTTP::RequestEventHandler
 		};
 
 		/**
+		 * @param loop the loop every request runs on, which must outlive this.
 		 * @param baseUrl the family-specific base, e.g.
 		 *        "https://ipv4.drop.example.org". A trailing slash is ignored.
 		 */
-		Client(ClientEventHandler* eh, std::string baseUrl, Family family);
-		Client(ClientEventHandler* eh, std::string baseUrl, Family family,
-		       const Options& options);
+		Client(Samurai::EventLoop& loop, ClientEventHandler* eh, std::string baseUrl,
+		       Family family);
+		Client(Samurai::EventLoop& loop, ClientEventHandler* eh, std::string baseUrl,
+		       Family family, const Options& options);
 		~Client() override;
 
 		Client(const Client&) = delete;
@@ -149,6 +151,7 @@ class Client final : public Samurai::IO::Net::HTTP::RequestEventHandler
 		void internal_prepare(std::chrono::milliseconds timeout);
 		void internal_fail(const ErrorInfo& info);
 
+		Samurai::EventLoop& loop;
 		ClientEventHandler* eventHandler;
 		std::string base_url;
 		Family family;

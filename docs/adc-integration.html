@@ -339,7 +339,7 @@ if (Drop::handleStunProbe(datagram, stunUser, stunPass, from, reply)) {
     <p><code>Drop::check()</code> exists and is one call, but it is
       <strong>blocking</strong> and opens its own ephemeral sockets, so it is for
       tools rather than for you. Drive <code>Drop::Client</code> from your
-      existing <code>SocketMonitor</code> instead — in this order, which is not
+      existing event loop instead — in this order, which is not
       arbitrary:</p>
 
     <ol class="flow">
@@ -356,7 +356,7 @@ if (Drop::handleStunProbe(datagram, stunUser, stunPass, from, reply)) {
 <pre><code>Drop::Client::Options options;
 options.localAddress = myAdvertisedAddress;   <span class="cmt">// see below</span>
 
-Drop::Client client(this, "https://ipv4.drop.quickdc.org",
+Drop::Client client(loop, this, "https://ipv4.drop.quickdc.org",
                     Drop::Family::IPv4, options);</code></pre>
 
     <p>Then apply the shared decision table rather than writing your own:</p>

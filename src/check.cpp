@@ -68,9 +68,9 @@ class Collector final : public ClientEventHandler
 };
 
 /** Run one request to completion. */
-bool await(Collector& events, std::chrono::milliseconds timeout)
+bool await(Samurai::EventLoop& loop, Collector& events, std::chrono::milliseconds timeout)
 {
-	pump([&] { return events.done; }, timeout);
+	pump(loop, [&] { return events.done; }, timeout);
 	if (!events.done)
 	{
 		events.error.error = Error::Transport;
@@ -87,11 +87,11 @@ class EgressProbe final : public Samurai::IO::Net::SocketEventHandler
 		bool reached = false;
 		std::string detail;
 
-		void run(const std::string& host, uint16_t port,
+		void run(Samurai::EventLoop& loop, const std::string& host, uint16_t port,
 		         const std::optional<Samurai::IO::Net::InetAddress>& localAddress,
 		         std::chrono::milliseconds timeout)
 		{
-			socket = Samurai::IO::Net::Socket::create(this, host, port);
+			socket = Samurai::IO::Net::Socket::create(loop, this, host, port);
 			if (!socket)
 			{
 				finished = true;
@@ -103,7 +103,7 @@ class EgressProbe final : public Samurai::IO::Net::SocketEventHandler
 			socket->setConnectTimeout(timeout);
 			socket->connect();
 
-			pump([&] { return finished; }, timeout);
+			pump(loop, [&] { return finished; }, timeout);
 			if (!finished)
 				detail = "timed out";
 
@@ -162,8 +162,8 @@ class EgressProbe final : public Samurai::IO::Net::SocketEventHandler
 		std::shared_ptr<Samurai::IO::Net::Socket> socket;
 };
 
-std::vector<EgressResult> testEgress(const ServerInfo& server, Family family,
-                                     const CheckOptions& options)
+std::vector<EgressResult> testEgress(Samurai::EventLoop& loop, const ServerInfo& server,
+                                     Family family, const CheckOptions& options)
 {
 	std::vector<EgressResult> out;
 
@@ -175,7 +175,7 @@ std::vector<EgressResult> testEgress(const ServerInfo& server, Family family,
 	for (uint16_t port : server.egressBannerPorts)
 	{
 		EgressProbe probe;
-		probe.run(host, port, options.localAddress, std::chrono::seconds(5));
+		probe.run(loop, host, port, options.localAddress, std::chrono::seconds(5));
 
 		EgressResult result;
 		result.port = port;
@@ -211,8 +211,8 @@ std::string familyUrl(const std::string& baseUrl, Family family)
 	return prefix + base;
 }
 
-FamilyReport checkFamily(const std::string& baseUrl, Family family,
-                         const CheckOptions& options)
+FamilyReport checkFamily(Samurai::EventLoop& loop, const std::string& baseUrl,
+                         Family family, const CheckOptions& options)
 {
 	FamilyReport report;
 	report.family = family;
@@ -226,13 +226,13 @@ FamilyReport checkFamily(const std::string& baseUrl, Family family,
 	clientOptions.allowUntrustedCertificate = options.allowUntrustedCertificate;
 
 	Collector events;
-	Client client(&events, report.baseUrl, family, clientOptions);
+	Client client(loop, &events, report.baseUrl, family, clientOptions);
 
 	/* Capabilities, which also confirms this is a DROP server rather than
 	   something that answers 200 to everything. */
 	events.reset();
 	client.requestServerInfo();
-	if (!await(events, options.timeout))
+	if (!await(loop, events, options.timeout))
 	{
 		report.error = events.error;
 		return report;
@@ -242,7 +242,7 @@ FamilyReport checkFamily(const std::string& baseUrl, Family family,
 	/* The reflexive address. Half of what the caller came for, and free. */
 	events.reset();
 	client.requestWhoami();
-	if (!await(events, options.timeout))
+	if (!await(loop, events, options.timeout))
 	{
 		report.error = events.error;
 		return report;
@@ -276,7 +276,7 @@ FamilyReport checkFamily(const std::string& baseUrl, Family family,
 	 */
 	const std::string bindAddress = bindAddressFor(options);
 
-	TcpResponder tcp;
+	TcpResponder tcp(loop);
 	if (!tcp.listen(family, bindAddress, options.tcpPort))
 	{
 		report.error.error = Error::Local;
@@ -284,7 +284,7 @@ FamilyReport checkFamily(const std::string& baseUrl, Family family,
 		return report;
 	}
 
-	UdpResponder udp;
+	UdpResponder udp(loop);
 	const bool wantUdp = report.server.supports(family, "udp");
 	if (wantUdp && !udp.listen(family, bindAddress, options.udpPort))
 	{
@@ -295,7 +295,7 @@ FamilyReport checkFamily(const std::string& baseUrl, Family family,
 
 	events.reset();
 	client.openSession();
-	if (!await(events, options.timeout))
+	if (!await(loop, events, options.timeout))
 	{
 		report.error = events.error;
 		return report;
@@ -314,7 +314,7 @@ FamilyReport checkFamily(const std::string& baseUrl, Family family,
 
 	events.reset();
 	client.requestInbound(session, tcpPorts, udpPorts);
-	if (!await(events, options.inboundTimeout))
+	if (!await(loop, events, options.inboundTimeout))
 	{
 		report.error = events.error;
 		return report;
@@ -339,7 +339,7 @@ FamilyReport checkFamily(const std::string& baseUrl, Family family,
 		report.inboundBeforeUpnp = report.inbound;
 		report.decisionBeforeUpnp = report.decision;
 
-		report.upnp = Upnp::addMapping(tcp.getPort(),
+		report.upnp = Upnp::addMapping(loop, tcp.getPort(),
 		                               wantUdp ? udp.getPort() : 0,
 		                               bindAddress, options.upnp);
 
@@ -349,7 +349,7 @@ FamilyReport checkFamily(const std::string& baseUrl, Family family,
 			   stops the rate limit from being a formality. */
 			events.reset();
 			client.openSession();
-			if (await(events, options.timeout))
+			if (await(loop, events, options.timeout))
 			{
 				const Session second = events.session;
 				if (wantUdp)
@@ -357,7 +357,7 @@ FamilyReport checkFamily(const std::string& baseUrl, Family family,
 
 				events.reset();
 				client.requestInbound(second, tcpPorts, udpPorts);
-				if (await(events, options.inboundTimeout))
+				if (await(loop, events, options.inboundTimeout))
 				{
 					report.inbound = events.inbound;
 
@@ -416,7 +416,7 @@ FamilyReport checkFamily(const std::string& baseUrl, Family family,
 			{
 				/* A forward to a port that could not be reached through it has
 				   no upside and is a hole somebody has to notice later. */
-				Upnp::removeMapping(report.upnp.tcpExternalPort,
+				Upnp::removeMapping(loop, report.upnp.tcpExternalPort,
 				                    report.upnp.udpExternalPort,
 				                    options.upnp);
 			}
@@ -450,14 +450,14 @@ FamilyReport checkFamily(const std::string& baseUrl, Family family,
 
 		if (natOptions.primary.valid())
 		{
-			report.nat = NatDiscovery::discover(natOptions);
+			report.nat = NatDiscovery::discover(loop, natOptions);
 			report.natTested = true;
 			applyNat(report.decision, report.nat);
 		}
 	}
 
 	if (options.testEgress)
-		report.egress = testEgress(report.server, family, options);
+		report.egress = testEgress(loop, report.server, family, options);
 
 	/*
 	 * Once the check is over the responder should stop answering: the
@@ -469,7 +469,7 @@ FamilyReport checkFamily(const std::string& baseUrl, Family family,
 	return report;
 }
 
-Report check(const std::string& baseUrl, const CheckOptions& options)
+Report check(Samurai::EventLoop& loop, const std::string& baseUrl, const CheckOptions& options)
 {
 	Report report;
 	report.server = baseUrl;
@@ -477,7 +477,7 @@ Report check(const std::string& baseUrl, const CheckOptions& options)
 	std::vector<Decision> decisions;
 	for (Family family : options.families)
 	{
-		FamilyReport fr = checkFamily(baseUrl, family, options);
+		FamilyReport fr = checkFamily(loop, baseUrl, family, options);
 		if (fr.error.ok())
 			decisions.push_back(fr.decision);
 		report.families.push_back(std::move(fr));

@@ -8,6 +8,7 @@
 
 #include "pump.h"
 
+#include <samurai/eventloop.h>
 #include <samurai/io/net/datagram.h>
 #include <samurai/io/net/socket.h>
 #include <samurai/io/net/socketaddress.h>
@@ -30,6 +31,18 @@
  * anywhere with a spoofed source address, so most of what follows asserts
  * silence rather than a reply.
  */
+
+static std::unique_ptr<Samurai::EventLoop> loop;
+
+EXO_SETUP({
+	loop = std::make_unique<Samurai::EventLoop>();
+	return loop->isValid() ? 1 : 0;
+});
+
+EXO_TEARDOWN({
+	loop.reset();
+	return 1;
+});
 
 namespace {
 
@@ -58,12 +71,12 @@ class LineClient final : public Samurai::IO::Net::SocketEventHandler
 		              std::chrono::milliseconds timeout = std::chrono::seconds(3))
 		{
 			toSend = line;
-			socket = Socket::create(this, "127.0.0.1", port);
+			socket = Socket::create(*loop, this, "127.0.0.1", port);
 			if (!socket) return false;
 			socket->setConnectTimeout(timeout);
 			socket->connect();
 
-			pump([&] { return finished; }, timeout);
+			pump(*loop, [&] { return finished; }, timeout);
 
 			socket->setEventHandler(nullptr);
 			socket->disableMonitor();
@@ -115,7 +128,7 @@ class DatagramClient final : public Samurai::IO::Net::DatagramEventHandler
 		          std::chrono::milliseconds wait = std::chrono::milliseconds(600))
 		{
 			InetSocketAddress any(InetAddress("127.0.0.1"), (uint16_t) 0);
-			socket = DatagramSocket::create(this, any);
+			socket = DatagramSocket::create(*loop, this, any);
 			if (!socket || socket->getFD() == -1) return false;
 			if (!socket->listen()) return false;
 
@@ -124,7 +137,7 @@ class DatagramClient final : public Samurai::IO::Net::DatagramEventHandler
 			packet.setAddress(&to);
 			socket->send(&packet);
 
-			pump([&] { return answered; }, wait);
+			pump(*loop, [&] { return answered; }, wait);
 
 			socket->setEventHandler(nullptr);
 			socket.reset();
@@ -213,7 +226,7 @@ EXO_TEST(challenge_refuses_an_overlong_line, {
 /* --- the TCP responder on a real socket ---------------------------------- */
 
 EXO_TEST(tcp_responder_answers_a_challenge, {
-	TcpResponder responder;
+	TcpResponder responder(*loop);
 	if (!responder.listen(Family::IPv4, "127.0.0.1", 0)) return false;
 	if (responder.getPort() == 0) return false;
 
@@ -226,7 +239,7 @@ EXO_TEST(tcp_responder_answers_a_challenge, {
 });
 
 EXO_TEST(tcp_responder_says_nothing_to_another_protocol, {
-	TcpResponder responder;
+	TcpResponder responder(*loop);
 	if (!responder.listen(Family::IPv4, "127.0.0.1", 0)) return false;
 
 	LineClient client;
@@ -236,7 +249,7 @@ EXO_TEST(tcp_responder_says_nothing_to_another_protocol, {
 });
 
 EXO_TEST(tcp_responder_survives_a_flood_on_one_connection, {
-	TcpResponder responder;
+	TcpResponder responder(*loop);
 	if (!responder.listen(Family::IPv4, "127.0.0.1", 0)) return false;
 
 	std::string flood(64 * 1024, 'x');
@@ -251,7 +264,7 @@ EXO_TEST(tcp_responder_survives_a_flood_on_one_connection, {
 });
 
 EXO_TEST(tcp_responder_handles_several_connections, {
-	TcpResponder responder;
+	TcpResponder responder(*loop);
 	if (!responder.listen(Family::IPv4, "127.0.0.1", 0)) return false;
 
 	for (int i = 0; i < 5; i++)
@@ -267,7 +280,7 @@ EXO_TEST(tcp_responder_handles_several_connections, {
 });
 
 EXO_TEST(tcp_responder_can_be_closed_and_reopened, {
-	TcpResponder responder;
+	TcpResponder responder(*loop);
 	if (!responder.listen(Family::IPv4, "127.0.0.1", 0)) return false;
 	const uint16_t first = responder.getPort();
 
@@ -281,7 +294,7 @@ EXO_TEST(tcp_responder_can_be_closed_and_reopened, {
 /* --- the UDP responder --------------------------------------------------- */
 
 EXO_TEST(udp_responder_answers_an_authenticated_probe, {
-	UdpResponder responder;
+	UdpResponder responder(*loop);
 	if (!responder.listen(Family::IPv4, "127.0.0.1", 0)) return false;
 	responder.setCredentials("session-id", "session-password");
 
@@ -316,7 +329,7 @@ EXO_TEST(udp_responder_is_silent_without_credentials, {
 	 * Silence rather than an error: an error is still a reply, and a reply to
 	 * a spoofed source is exactly the reflection this rule prevents.
 	 */
-	UdpResponder responder;
+	UdpResponder responder(*loop);
 	if (!responder.listen(Family::IPv4, "127.0.0.1", 0)) return false;
 	/* No credentials set, which is a client that has no session open. */
 
@@ -334,7 +347,7 @@ EXO_TEST(udp_responder_is_silent_without_credentials, {
 });
 
 EXO_TEST(udp_responder_refuses_a_wrong_key_or_username, {
-	UdpResponder responder;
+	UdpResponder responder(*loop);
 	if (!responder.listen(Family::IPv4, "127.0.0.1", 0)) return false;
 	responder.setCredentials("session-id", "session-password");
 
@@ -375,7 +388,7 @@ EXO_TEST(udp_responder_ignores_what_is_not_stun, {
 	 * The socket is shared with ADC search results, which must reach the
 	 * application rather than being consumed or answered here.
 	 */
-	UdpResponder responder;
+	UdpResponder responder(*loop);
 	if (!responder.listen(Family::IPv4, "127.0.0.1", 0)) return false;
 	responder.setCredentials("session-id", "session-password");
 
@@ -392,7 +405,7 @@ EXO_TEST(udp_responder_ignores_what_is_not_stun, {
 });
 
 EXO_TEST(udp_responder_ignores_a_response_rather_than_ping_ponging, {
-	UdpResponder responder;
+	UdpResponder responder(*loop);
 	if (!responder.listen(Family::IPv4, "127.0.0.1", 0)) return false;
 	responder.setCredentials("session-id", "session-password");
 
@@ -411,7 +424,7 @@ EXO_TEST(udp_responder_ignores_a_response_rather_than_ping_ponging, {
 EXO_TEST(udp_responder_stops_when_credentials_are_cleared, {
 	/* What a client does once its check is finished: keeping the responder
 	   answering is running a service nobody asked for. */
-	UdpResponder responder;
+	UdpResponder responder(*loop);
 	if (!responder.listen(Family::IPv4, "127.0.0.1", 0)) return false;
 	responder.setCredentials("session-id", "session-password");
 
@@ -440,7 +453,7 @@ EXO_TEST(udp_responder_stops_when_credentials_are_cleared, {
 });
 
 EXO_TEST(udp_responder_survives_garbage, {
-	UdpResponder responder;
+	UdpResponder responder(*loop);
 	if (!responder.listen(Family::IPv4, "127.0.0.1", 0)) return false;
 	responder.setCredentials("session-id", "session-password");
 

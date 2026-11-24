@@ -14,6 +14,7 @@
 #include <drop/check.h>
 #include <drop/types.h>
 
+#include <samurai/eventloop.h>
 #include <samurai/io/net/inetaddress.h>
 
 #include <stdio.h>
@@ -281,7 +282,8 @@ int main(int argc, char** argv)
 		return 2;
 	}
 
-	const Drop::Report report = Drop::check(server, options);
+	Samurai::EventLoop loop;
+	const Drop::Report report = Drop::check(loop, server, options);
 
 	for (const Drop::FamilyReport& fr : report.families)
 		printFamily(fr);

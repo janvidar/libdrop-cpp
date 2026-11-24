@@ -11,6 +11,8 @@
 #include <chrono>
 #include <string>
 
+namespace Samurai { class EventLoop; }
+
 namespace Drop {
 
 /** What a mapping attempt achieved. */
@@ -55,7 +57,7 @@ struct UpnpResult
 /**
  * Ask the local gateway for a port mapping.
  *
- * Synchronous: it drives the socket monitor until the gateway answers, so it
+ * Synchronous: it drives the loop it is given until the gateway answers, so it
  * MUST NOT be called from inside an event handler. Discovery is a multicast
  * search with a timeout, so a run where no gateway exists takes as long as
  * that timeout and then reports it plainly.
@@ -96,12 +98,14 @@ class Upnp
 		 * @param internalAddress the address to forward to, or empty to let the
 		 *        gateway be told whichever of this host's addresses faces it.
 		 */
-		static UpnpResult addMapping(uint16_t tcpPort, uint16_t udpPort,
+		static UpnpResult addMapping(Samurai::EventLoop& loop,
+		                             uint16_t tcpPort, uint16_t udpPort,
 		                             const std::string& internalAddress,
 		                             const UpnpOptions& options = UpnpOptions());
 
 		/** Remove a mapping this process added. */
-		static bool removeMapping(uint16_t tcpPort, uint16_t udpPort,
+		static bool removeMapping(Samurai::EventLoop& loop,
+		                          uint16_t tcpPort, uint16_t udpPort,
 		                          const UpnpOptions& options = UpnpOptions());
 
 		/** Whether UPnP is worth attempting at all for this family. */

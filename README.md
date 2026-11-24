@@ -34,19 +34,21 @@ this one:
 
     #include <drop/check.h>
 
+    Samurai::EventLoop loop;
+
     Drop::CheckOptions options;
     options.families = { Drop::Family::IPv4, Drop::Family::IPv6 };
     options.useUpnp = true;
 
-    const Drop::Report report = Drop::check("https://drop.quickdc.org", options);
+    const Drop::Report report = Drop::check(loop, "https://drop.quickdc.org", options);
 
     for (const Drop::FamilyReport& fr : report.families) {
         printf("%s: %s\n", toString(fr.family), toString(fr.decision.mode));
         printf("  %s\n", fr.decision.reason.c_str());
     }
 
-The blocking `check()` drives the socket monitor itself and must not be called
-from inside an event handler. A client with its own event loop uses
+The blocking `check()` drives the loop it is given itself and must not be called
+from inside an event handler. A client that runs its own event loop uses
 `Drop::Client` and the responders directly; `src/check.cpp` is the worked
 example of doing so.
 

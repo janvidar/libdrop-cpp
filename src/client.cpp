@@ -45,14 +45,16 @@ int retryAfterOf(const HTTP::Response& response)
 
 } // namespace
 
-Client::Client(ClientEventHandler* eh, std::string baseUrl, Family family)
-	: Client(eh, std::move(baseUrl), family, Options())
+Client::Client(Samurai::EventLoop& loop, ClientEventHandler* eh, std::string baseUrl,
+               Family family)
+	: Client(loop, eh, std::move(baseUrl), family, Options())
 {
 }
 
-Client::Client(ClientEventHandler* eh, std::string baseUrl, Family family,
-               const Options& options)
-	: eventHandler(eh)
+Client::Client(Samurai::EventLoop& loop, ClientEventHandler* eh, std::string baseUrl,
+               Family family, const Options& options)
+	: loop(loop)
+	, eventHandler(eh)
 	, base_url(trimSlash(std::move(baseUrl)))
 	, family(family)
 	, options(options)
@@ -90,7 +92,7 @@ void Client::internal_prepare(std::chrono::milliseconds timeout)
 	   named, so none is followed. */
 	opts.maxRedirects = 0;
 
-	http = std::make_unique<HTTP::Client>(this, opts);
+	http = std::make_unique<HTTP::Client>(loop, this, opts);
 }
 
 void Client::internal_get(Pending what, const std::string& path)

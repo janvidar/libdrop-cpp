@@ -57,7 +57,10 @@ int64_t nowSeconds()
 
 /* --- TcpResponder -------------------------------------------------------- */
 
-TcpResponder::TcpResponder() = default;
+TcpResponder::TcpResponder(Samurai::EventLoop& loop)
+	: loop(loop)
+{
+}
 
 TcpResponder::~TcpResponder()
 {
@@ -100,7 +103,7 @@ bool TcpResponder::listen(Family family, const std::string& bindAddress, uint16_
 	close();
 
 	const InetSocketAddress addr(anyAddressFor(family, bindAddress), port);
-	server = ServerSocket::create(this, addr);
+	server = ServerSocket::create(loop, this, addr);
 	if (!server || server->getFD() == -1)
 	{
 		server.reset();
@@ -197,7 +200,10 @@ void TcpResponder::EventError(const Socket* which, Samurai::IO::Net::SocketError
 
 /* --- UdpResponder -------------------------------------------------------- */
 
-UdpResponder::UdpResponder() = default;
+UdpResponder::UdpResponder(Samurai::EventLoop& loop)
+	: loop(loop)
+{
+}
 
 UdpResponder::~UdpResponder()
 {
@@ -209,7 +215,7 @@ bool UdpResponder::listen(Family family, const std::string& bindAddress, uint16_
 	close();
 
 	const InetSocketAddress addr(anyAddressFor(family, bindAddress), port);
-	socket = DatagramSocket::create(this, addr);
+	socket = DatagramSocket::create(loop, this, addr);
 	if (!socket || socket->getFD() == -1)
 	{
 		socket.reset();

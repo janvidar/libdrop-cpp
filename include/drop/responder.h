@@ -44,7 +44,8 @@ class TcpResponder final
 	, public Samurai::IO::Net::SocketEventHandler
 {
 	public:
-		TcpResponder();
+		/** @param loop the loop it listens on, which must outlive it. */
+		explicit TcpResponder(Samurai::EventLoop& loop);
 		~TcpResponder() override;
 
 		TcpResponder(const TcpResponder&) = delete;
@@ -96,6 +97,7 @@ class TcpResponder final
 
 		void forget(const Samurai::IO::Net::Socket* socket);
 
+		Samurai::EventLoop& loop;
 		std::shared_ptr<Samurai::IO::Net::ServerSocket> server;
 		/** Held until each has answered or gone away. */
 		std::vector<std::shared_ptr<Samurai::IO::Net::Socket>> accepted;
@@ -147,7 +149,8 @@ bool handleStunProbe(std::span<const uint8_t> datagram,
 class UdpResponder final : public Samurai::IO::Net::DatagramEventHandler
 {
 	public:
-		UdpResponder();
+		/** @param loop the loop it listens on, which must outlive it. */
+		explicit UdpResponder(Samurai::EventLoop& loop);
 		~UdpResponder() override;
 
 		UdpResponder(const UdpResponder&) = delete;
@@ -181,6 +184,7 @@ class UdpResponder final : public Samurai::IO::Net::DatagramEventHandler
 		void EventDatagramError(const Samurai::IO::Net::DatagramSocket*,
 		                        const char* msg) override;
 
+		Samurai::EventLoop& loop;
 		std::shared_ptr<Samurai::IO::Net::DatagramSocket> socket;
 		std::string username;
 		std::string password;

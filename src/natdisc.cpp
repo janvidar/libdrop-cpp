@@ -45,14 +45,15 @@ enum class Outcome
 class Transactor final : public Samurai::IO::Net::DatagramEventHandler
 {
 	public:
-		Transactor(const std::string& bindAddress, bool wantIPv6)
+		Transactor(Samurai::EventLoop& loop, const std::string& bindAddress, bool wantIPv6)
+			: loop(loop)
 		{
 			const InetAddress local(bindAddress.empty()
 				? (wantIPv6 ? "::" : "0.0.0.0")
 				: bindAddress);
 			const InetSocketAddress addr(local, (uint16_t) 0);
 
-			socket = DatagramSocket::create(this, addr);
+			socket = DatagramSocket::create(loop, this, addr);
 			if (socket && socket->getFD() != -1 && socket->listen())
 				port = socket->getLocalPort();
 			else
@@ -131,7 +132,7 @@ class Transactor final : public Samurai::IO::Net::DatagramEventHandler
 
 				const auto slice = std::chrono::duration_cast<std::chrono::milliseconds>(
 					wake - std::chrono::steady_clock::now());
-				pump([&] { return answered || errored; },
+				pump(loop, [&] { return answered || errored; },
 				     slice.count() > 0 ? slice : std::chrono::milliseconds(1));
 			}
 
@@ -230,6 +231,7 @@ class Transactor final : public Samurai::IO::Net::DatagramEventHandler
 			socket->send(&packet);
 		}
 
+		Samurai::EventLoop& loop;
 		std::shared_ptr<DatagramSocket> socket;
 		uint16_t port = 0;
 
@@ -270,10 +272,10 @@ const char* UNSUPPORTED_NOTE =
  * as endpoint-independent-filtering, which for a restrictive one is exactly
  * backwards.
  */
-Behaviour discoverFiltering(const NatDiscovery::Options& options, bool v6,
-                            std::vector<std::string>& notes)
+Behaviour discoverFiltering(Samurai::EventLoop& loop, const NatDiscovery::Options& options,
+                            bool v6, std::vector<std::string>& notes)
 {
-	Transactor fresh(options.localAddress, v6);
+	Transactor fresh(loop, options.localAddress, v6);
 	if (!fresh.usable())
 		return Behaviour::Unknown;
 
@@ -317,7 +319,7 @@ Behaviour discoverFiltering(const NatDiscovery::Options& options, bool v6,
 
 } // namespace
 
-NatResult NatDiscovery::discover(const Options& options)
+NatResult NatDiscovery::discover(Samurai::EventLoop& loop, const Options& options)
 {
 	NatResult result;
 	result.mapping = Behaviour::Unknown;
@@ -344,7 +346,7 @@ NatResult NatDiscovery::discover(const Options& options)
 
 	const bool v6 = options.primary.v6;
 
-	Transactor mapper(options.localAddress, v6);
+	Transactor mapper(loop, options.localAddress, v6);
 	if (!mapper.usable())
 	{
 		result.notes.push_back("A local UDP socket could not be opened.");
@@ -390,7 +392,7 @@ NatResult NatDiscovery::discover(const Options& options)
 	{
 		/* The mapped address is our own, so nothing is translating. */
 		result.mapping = Behaviour::None;
-		result.filtering = discoverFiltering(options, v6, result.notes);
+		result.filtering = discoverFiltering(loop, options, v6, result.notes);
 		return result;
 	}
 
@@ -427,7 +429,7 @@ NatResult NatDiscovery::discover(const Options& options)
 	{
 		result.notes.push_back("No reply from the alternate address, so mapping "
 		                       "behaviour could not be classified.");
-		result.filtering = discoverFiltering(options, v6, result.notes);
+		result.filtering = discoverFiltering(loop, options, v6, result.notes);
 		return result;
 	}
 
@@ -448,7 +450,7 @@ NatResult NatDiscovery::discover(const Options& options)
 			result.notes.push_back("No reply from the alternate address and "
 			                       "port, so mapping behaviour could not be "
 			                       "fully classified.");
-			result.filtering = discoverFiltering(options, v6, result.notes);
+			result.filtering = discoverFiltering(loop, options, v6, result.notes);
 			return result;
 		}
 
@@ -461,7 +463,7 @@ NatResult NatDiscovery::discover(const Options& options)
 			result.mapping = Behaviour::AddressAndPortDependent;
 	}
 
-	result.filtering = discoverFiltering(options, v6, result.notes);
+	result.filtering = discoverFiltering(loop, options, v6, result.notes);
 	return result;
 }
 

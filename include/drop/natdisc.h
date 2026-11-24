@@ -12,6 +12,8 @@
 #include <chrono>
 #include <string>
 
+namespace Samurai { class EventLoop; }
+
 namespace Drop {
 
 /**
@@ -23,7 +25,7 @@ namespace Drop {
  * created. Only the DROP inbound UDP probe, which arrives from an endpoint the
  * client never contacted, answers the second question.
  *
- * Synchronous: it drives the socket monitor, so it MUST NOT be called from
+ * Synchronous: it drives the loop it is given, so it MUST NOT be called from
  * inside an event handler.
  *
  * WHAT THIS NEEDS FROM THE SERVER: an OTHER-ADDRESS in the first response, and
@@ -70,7 +72,7 @@ class NatDiscovery
 			std::chrono::milliseconds timeout{ 3000 };
 		};
 
-		static NatResult discover(const Options& options);
+		static NatResult discover(Samurai::EventLoop& loop, const Options& options);
 };
 
 }
