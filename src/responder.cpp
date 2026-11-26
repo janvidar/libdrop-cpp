@@ -3,6 +3,7 @@
  * See the file "COPYING" for licensing details.
  */
 
+#include <chrono>
 #include <drop/responder.h>
 
 #include "hmac.h"
@@ -48,9 +49,8 @@ InetAddress anyAddressFor(Family family, const std::string& bindAddress)
 
 int64_t nowSeconds()
 {
-	timespec ts{};
-	clock_gettime(CLOCK_MONOTONIC, &ts);
-	return static_cast<int64_t>(ts.tv_sec);
+	return std::chrono::duration_cast<std::chrono::seconds>(
+		std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
 } // namespace

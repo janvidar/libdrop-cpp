@@ -7,7 +7,7 @@
 
 #include "hmac.h"
 
-#include <arpa/inet.h>
+#include <samurai/io/net/socketglue.h>
 #include <string.h>
 
 #include <zlib.h>  /* crc32, for FINGERPRINT; Samurai already links zlib */
